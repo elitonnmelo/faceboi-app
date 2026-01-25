@@ -7,5 +7,6 @@ const withPWA = require('next-pwa')({
 
 module.exports = withPWA({
   reactStrictMode: true,
+  // Força o uso do SWC para minificação em vez do Turbopack
   swcMinify: true,
 });
