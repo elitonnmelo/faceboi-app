@@ -1,0 +1,6 @@
+node_modules/
+.next/
+.env.local
+rebanho-app/node_modules/
+rebanho-app/.next/
+rebanho-app/.env.local
