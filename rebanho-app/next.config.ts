@@ -7,11 +7,14 @@ const withPWA = require('next-pwa')({
 });
 
 const nextConfig = {
-  // Isso ajuda a evitar conflitos com o Turbopack na Vercel
+  // Esta configuração silencia o erro do Turbopack na Vercel
   experimental: {
     turbo: {},
   },
-  // Se você tiver outras configs como imagens ou redirecionamentos, coloque aqui
+  // Garante compatibilidade com módulos antigos se necessário
+  webpack: (config) => {
+    return config;
+  },
 };
 
 module.exports = withPWA(nextConfig);
