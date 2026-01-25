@@ -1,11 +1,11 @@
 {
-  "name": "Gerenciador de Rebanho",
-  "short_name": "Rebanho",
-  "description": "App para gestão de gado e controle de peso",
+  "name": "FaceBoi - Gestão Pecuária",
+  "short_name": "FaceBoi",
+  "description": "Sistema de gestão de rebanho offline",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#16a34a",
+  "theme_color": "#15803d",
   "icons": [
     {
       "src": "/icon-192.png",

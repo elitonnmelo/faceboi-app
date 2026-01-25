@@ -84,63 +84,43 @@ export default function NovoAnimal() {
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
-    if (!brinco || !peso) { alert('Brinco e Peso são obrigatórios'); return; }
-    if (!user) { alert('Erro de autenticação'); return; }
-
+    if (!user) return;
     setCarregando(true);
 
+    const dadosAnimal = {
+        user_id: user.id,
+        brinco,
+        raca: raca || 'Mestiço',
+        peso_atual: Number(peso),
+        sexo,
+        tipo,
+        origem,
+        data_entrada: new Date(dataEntrada).toISOString(),
+        foto
+    };
+
     try {
-      // 2. SALVAR ANIMAL NA NUVEM (Supabase)
-      const { data: animalData, error: animalError } = await supabase
-        .from('animais')
-        .insert([
-          {
-            user_id: user.id, // Fundamental para a segurança
-            brinco,
-            raca: raca || 'Mestiço',
-            peso_atual: Number(peso),
-            status: 'ativo',
-            sexo,
-            tipo,
-            origem,
-            data_entrada: new Date(dataEntrada).toISOString(),
-            custo_aquisicao: origem === 'compra' && custo ? Number(custo) : 0,
-            pai: origem === 'nascido' ? pai : null,
-            mae: origem === 'nascido' ? mae : null,
-            foto // Salvando a string base64 direto (ok para fotos pequenas)
-          }
-        ])
-        .select() // Pede para retornar o dado salvo (precisamos do ID novo)
-        .single();
+        // Tenta salvar direto no Supabase
+        const { error } = await supabase.from('animais').insert([dadosAnimal]);
 
-      if (animalError) throw animalError;
+        if (error) throw error; // Se falhar (ex: sem internet), cai no catch
 
-      // 3. SALVAR O PRIMEIRO EVENTO
-      const { error: eventError } = await supabase
-        .from('eventos')
-        .insert([
-          {
-            user_id: user.id,
-            animal_id: animalData.id, // ID gerado pelo Postgres
-            tipo: 'observacao',
-            descricao: origem === 'compra' ? 'Compra registrada' : 'Nascimento registrado',
-            data: new Date().toISOString(),
-            custo: 0
-          }
-        ]);
+        alert('Salvo na nuvem! ☁️');
+        router.push('/');
+    } catch (erro) {
+        // SE DER ERRO (Sem internet), SALVA NA FILA LOCAL
+        await dbLocal.fila_sincronizacao.add({
+        tabela: 'animais',
+        dados: dadosAnimal,
+        status: 'pendente'
+        });
 
-      if (eventError) throw eventError;
-
-      alert('Salvo na nuvem com sucesso! ☁️');
-      router.push('/'); // Volta pro dashboard
-
-    } catch (erro: any) {
-      console.error(erro);
-      alert('Erro ao salvar: ' + erro.message);
+        alert('Você está sem internet. O boi foi salvo no celular e será enviado para a nuvem assim que o sinal voltar! 📶✅');
+        router.push('/');
     } finally {
-      setCarregando(false);
+        setCarregando(false);
     }
-  }
+    }
 
   const inputStyle = "w-full p-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none font-medium text-gray-900 placeholder-gray-400";
   const labelStyle = "text-xs font-bold text-gray-500 mb-1 block uppercase";
