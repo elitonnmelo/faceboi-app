@@ -7,10 +7,8 @@ const withPWA = require('next-pwa')({
 });
 
 const nextConfig = {
-  // Isso silencia o erro do Turbopack na Vercel
-  experimental: {
-    turbo: {},
-  },
+  // Removido o bloco experimental que deu erro
+  reactStrictMode: true,
 };
 
 module.exports = withPWA(nextConfig);
