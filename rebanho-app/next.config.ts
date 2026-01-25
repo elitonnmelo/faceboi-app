@@ -1,12 +1,7 @@
-const withPWA = require('next-pwa')({
-  dest: 'public',
-  disable: process.env.NODE_ENV === 'development',
-  register: true,
-  skipWaiting: true,
-});
-
-module.exports = withPWA({
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   reactStrictMode: true,
-  // Força o uso do SWC para minificação em vez do Turbopack
-  swcMinify: true,
-});
+  // Vamos deixar o PWA de fora só por um commit para ver se o site sobe
+}
+
+module.exports = nextConfig
