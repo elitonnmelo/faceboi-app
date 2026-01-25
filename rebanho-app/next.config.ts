@@ -1,4 +1,3 @@
-/** @type {import('next').NextConfig} */
 const withPWA = require('next-pwa')({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development',
@@ -6,9 +5,7 @@ const withPWA = require('next-pwa')({
   skipWaiting: true,
 });
 
-const nextConfig = {
-  // Removido o bloco experimental que deu erro
+module.exports = withPWA({
   reactStrictMode: true,
-};
-
-module.exports = withPWA(nextConfig);
+  swcMinify: true,
+});
