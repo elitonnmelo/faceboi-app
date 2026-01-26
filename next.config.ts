@@ -1,13 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: {
-    // IGNORA ERROS DE TYPESCRIPT NO BUILD
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    // IGNORA ERROS DE LINT (ESTILO) NO BUILD
-    ignoreDuringBuilds: true,
-  },
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+  // Isso evita que o build trave tentando gerar páginas estáticas
+  output: 'standalone', 
+  images: { unoptimized: true }
 }
 
 module.exports = nextConfig
