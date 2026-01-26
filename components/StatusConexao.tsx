@@ -5,18 +5,18 @@ export default function StatusConexao() {
   const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
-    // Verifica se estamos no navegador
     if (typeof window !== 'undefined') {
       setIsOnline(navigator.onLine);
-      const goOnline = () => setIsOnline(true);
-      const goOffline = () => setIsOnline(false);
+      
+      const setOnline = () => setIsOnline(true);
+      const setOffline = () => setIsOnline(false);
 
-      window.addEventListener('online', goOnline);
-      window.addEventListener('offline', goOffline);
+      window.addEventListener('online', setOnline);
+      window.addEventListener('offline', setOffline);
 
       return () => {
-        window.removeEventListener('online', goOnline);
-        window.removeEventListener('offline', goOffline);
+        window.removeEventListener('online', setOnline);
+        window.removeEventListener('offline', setOffline);
       };
     }
   }, []);

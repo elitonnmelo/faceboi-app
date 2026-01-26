@@ -1,14 +1,16 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect } from 'react'; // <--- Removido o 'use' que dava erro
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
-export default function DetalhesAnimal({ params }: { params: Promise<{ id: string }> }) {
+// <--- Correção aqui: params não é mais Promise no Next 14
+export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const unwrappedParams = use(params);
-  const idDoAnimal = Number(unwrappedParams.id);
+  
+  // <--- Correção aqui: Acesso direto ao ID sem "unwrappedParams"
+  const idDoAnimal = Number(params.id);
 
   // Estados de Dados
   const [animal, setAnimal] = useState<any>(null);
@@ -40,7 +42,7 @@ export default function DetalhesAnimal({ params }: { params: Promise<{ id: strin
       const { data: eventosData, error: eventosError } = await supabase
         .from('eventos')
         .select('*')
-        .eq('animal_id', idDoAnimal) // Nota: animal_id com underline
+        .eq('animal_id', idDoAnimal)
         .order('data', { ascending: true });
 
       if (eventosError) throw eventosError;
@@ -56,11 +58,13 @@ export default function DetalhesAnimal({ params }: { params: Promise<{ id: strin
   };
 
   useEffect(() => {
-    carregarDados();
+    if (idDoAnimal) {
+        carregarDados();
+    }
   }, [idDoAnimal]);
 
 
-  // PREPARAR GRÁFICO (Adaptado para estrutura do Supabase)
+  // PREPARAR GRÁFICO
   const dadosGrafico = eventos
     ?.filter(e => e.tipo === 'pesagem' || (e.tipo === 'observacao' && e.descricao && e.descricao.includes('registrad')))
     .map(e => ({

@@ -1,19 +1,10 @@
 import "./globals.css";
-import { Geist, Geist_Mono } from "next/font/google";
-import MenuLateral from "../components/MenuLateral";
-import StatusConexao from "../components/StatusConexao"; // Vamos criar este abaixo
+import { Inter } from "next/font/google"; // Usando Inter que é padrão e seguro
+import MenuLateral from "@/components/MenuLateral";
+import StatusConexao from "@/components/StatusConexao";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const inter = Inter({ subsets: ["latin"] });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-// Metadata só funciona em Server Components (sem 'use client')
 export const metadata = {
   title: 'FaceBoi',
   description: 'Gestão de Rebanho Inteligente',
@@ -28,10 +19,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-br">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={inter.className}>
         <StatusConexao />
         <MenuLateral />
-        <main>{children}</main>
+        {children}
       </body>
     </html>
   );
