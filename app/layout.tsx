@@ -1,10 +1,7 @@
-'use client';
-
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Geist, Geist_Mono } from "next/font/google";
 import MenuLateral from "../components/MenuLateral";
-import { useState, useEffect } from 'react';
+import StatusConexao from "../components/StatusConexao"; // Vamos criar este abaixo
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,44 +13,25 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Metadata só funciona em Server Components (sem 'use client')
 export const metadata = {
   title: 'FaceBoi',
   description: 'Gestão de Rebanho Inteligente',
-  manifest: '/manifest.json', // <--- Importante!
+  manifest: '/manifest.json',
   themeColor: '#15803d',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
 };
-
-export default function StatusConexao() {
-  const [isOnline, setIsOnline] = useState(true);
-
-  useEffect(() => {
-    setIsOnline(navigator.onLine);
-    window.addEventListener('online', () => setIsOnline(true));
-    window.addEventListener('offline', () => setIsOnline(false));
-  }, []);
-
-  if (isOnline) return null; // Não mostra nada se estiver online
-
-  return (
-    <div className="fixed top-0 left-0 w-full bg-red-600 text-white text-[10px] font-bold py-1 text-center z-[9999] uppercase tracking-widest">
-      Você está Offline - Os dados serão salvos localmente 📴
-    </div>
-  );
-}
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+    <html lang="pt-br">
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <StatusConexao />
         <MenuLateral />
-        {children}
+        <main>{children}</main>
       </body>
     </html>
   );
