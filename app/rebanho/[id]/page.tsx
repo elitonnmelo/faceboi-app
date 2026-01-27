@@ -33,7 +33,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   const router = useRouter();
   const idDoAnimal = Number(params.id);
 
-  // Estados
   const [animal, setAnimal] = useState<any>(null);
   const [eventos, setEventos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +47,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   const [modalVenda, setModalVenda] = useState(false);
   const [precoVenda, setPrecoVenda] = useState('');
 
-  // 1. CARREGAR DADOS
+  // CARREGAR DADOS
   const carregarDados = async () => {
     try {
       const { data: animalData, error: animalError } = await supabase
@@ -69,7 +68,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
       setEventos(eventosData || []);
 
     } catch (error) {
-      console.error(error);
       alert('Erro ao carregar detalhes.');
       router.push('/rebanho');
     } finally {
@@ -81,14 +79,34 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     if (idDoAnimal) carregarDados();
   }, [idDoAnimal]);
 
+  // --- FUNÇÃO DELETAR (NOVA) ---
+  const deletarAnimal = async () => {
+    const confirmacao = window.confirm(`Tem certeza que deseja EXCLUIR o animal Brinco ${animal.brinco}? Essa ação não tem volta.`);
+    if (!confirmacao) return;
+
+    try {
+        // Primeiro apaga os eventos para não dar erro de vínculo
+        await supabase.from('eventos').delete().eq('animal_id', idDoAnimal);
+        
+        // Depois apaga o animal
+        const { error } = await supabase.from('animais').delete().eq('id', idDoAnimal);
+        
+        if (error) throw error;
+
+        alert('Animal excluído com sucesso.');
+        router.push('/rebanho'); // Volta para a lista
+    } catch (error) {
+        alert('Erro ao excluir. Verifique sua conexão.');
+    }
+  };
+
   // ATUALIZAR FOTO
   const atualizarFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       try {
           const fotoBase64 = await comprimirImagem(file);
-          const { error } = await supabase.from('animais').update({ foto: fotoBase64 }).eq('id', idDoAnimal);
-          if (error) throw error;
+          await supabase.from('animais').update({ foto: fotoBase64 }).eq('id', idDoAnimal);
           setAnimal({ ...animal, foto: fotoBase64 });
       } catch (error) {
           alert("Erro ao salvar foto.");
@@ -191,10 +209,21 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
             <div className="w-full h-full flex items-center justify-center text-gray-600 text-6xl">🐮</div>
         )}
         
+        {/* BOTÃO VOLTAR */}
         <button onClick={() => router.back()} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow text-black font-bold z-10 hover:bg-gray-200">←</button>
         
+        {/* BOTÃO EXCLUIR (NOVO) - Lado direito superior */}
+        <button 
+            onClick={deletarAnimal} 
+            className="absolute top-4 right-4 bg-red-100 p-2 rounded-full shadow text-red-600 font-bold z-10 hover:bg-red-200 border-2 border-red-200"
+            title="Excluir Animal"
+        >
+            🗑️
+        </button>
+
+        {/* BOTÃO FOTO - Um pouco mais abaixo do excluir */}
         {animal.status === 'ativo' && (
-            <label className="absolute top-4 right-4 bg-white p-3 rounded-full shadow cursor-pointer z-10 hover:bg-gray-200 active:scale-95 transition">
+            <label className="absolute top-16 right-4 bg-white p-3 rounded-full shadow cursor-pointer z-10 hover:bg-gray-200 active:scale-95 transition">
                 <span className="text-xl">📷</span>
                 <input type="file" accept="image/*" className="hidden" onChange={atualizarFoto} />
             </label>
@@ -215,7 +244,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
             </div>
             <p className="text-white/90 text-lg font-medium mb-3 drop-shadow-sm">{animal.raca} • {animal.tipo}</p>
             
-            {/* --- VOLTOU AQUI: FILIAÇÃO E ORIGEM --- */}
             <div className="grid grid-cols-2 gap-2 text-sm text-gray-300 border-t border-gray-600 pt-3">
                 <div>
                     <span className="block text-xs uppercase text-gray-500">{animal.origem === 'nascido' ? 'Nascimento' : 'Aquisição'}</span>
