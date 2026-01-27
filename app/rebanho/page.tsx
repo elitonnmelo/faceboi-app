@@ -19,82 +19,61 @@ export default function MeuRebanho() {
 
   const carregarDados = async () => {
     setLoading(true);
-    
-    // 1. CARREGA CACHE (IMEDIATO)
+
+    // 1. CARREGA TUDO O QUE TEM NO CELULAR AGORA (Pendentes + Cache)
     const pendentes = await db.animaisPendentes.toArray();
-    const cacheados = await db.animaisCache.toArray();
-    
+    const cache = await db.animaisCache.toArray();
+
+    // Formata os pendentes para a lista
     const pendentesFormatados = pendentes.map(a => ({
-        ...a, id: `temp-${a.id}`, is_offline: true, status: 'ativo'
+        ...a, 
+        id: `temp-${a.id}`, // ID temporário
+        is_offline: true, 
+        status: 'ativo'
     }));
 
-    setAnimais([...pendentesFormatados, ...cacheados]);
+    // Mostra na tela imediatamente
+    setAnimais([...pendentesFormatados, ...cache]);
     setLoading(false);
 
-    // 2. TENTA NUVEM
+    // 2. SE TIVER INTERNET, BUSCA NA NUVEM E ATUALIZA O CACHE
     try {
-        // --- CORREÇÃO OFFLINE: getSession ---
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return; // Se não tem sessão, fica com o que tem no cache
-
-        const user = session.user;
+        if (!session) return;
 
         const { data, error } = await supabase
             .from('animais')
             .select('*')
             .eq('status', 'ativo')
-            .eq('user_id', user.id)
+            .eq('user_id', session.user.id)
             .order('created_at', { ascending: false });
 
         if (!error && data) {
-            setModoOffline(false);
+            // Atualiza a tela com dados frescos
             setAnimais([...pendentesFormatados, ...data]);
             
-            // ATUALIZA O CACHE PARA A PRÓXIMA VEZ
+            // Salva no celular para a próxima vez que estiver offline
             await db.animaisCache.clear();
             await db.animaisCache.bulkPut(data);
+            setModoOffline(false);
         }
     } catch (e) {
-        console.log("Sem internet. Mantendo dados do cache.");
+        console.log("Modo Offline ativado.");
         setModoOffline(true);
     }
   };
-
-  async function deletar(id: string | number) {
-    if (!confirm('Tem certeza?')) return;
-    const idString = String(id);
-
-    if (idString.startsWith('temp-')) {
-        const idReal = Number(idString.replace('temp-', ''));
-        await db.animaisPendentes.delete(idReal);
-    } else {
-        try {
-            const { error } = await supabase.from('animais').delete().eq('id', id);
-            if (error) throw error;
-            await db.animaisCache.delete(Number(id));
-        } catch (e) {
-            alert("Você precisa de internet para deletar animais da nuvem.");
-            return;
-        }
-    }
-    setAnimais(prev => prev.filter(boi => String(boi.id) !== idString));
-  }
 
   const listaFiltrada = animais.filter(boi => 
     boi.brinco?.toLowerCase().includes(busca.toLowerCase()) || 
     (boi.tipo && boi.tipo.toLowerCase().includes(busca.toLowerCase()))
   );
 
-  const totalCabecas = listaFiltrada.length;
-  const pesoTotal = listaFiltrada.reduce((acc, boi) => acc + (Number(boi.peso_atual) || 0), 0);
-  const totalArrobas = (pesoTotal / 30).toFixed(1);
-
   return (
     <div className="min-h-screen bg-gray-100 p-4 pt-20">
       
       {modoOffline && (
         <div className="bg-yellow-100 text-yellow-800 p-2 text-xs text-center font-bold mb-4 rounded-lg border border-yellow-300">
-            📡 Modo Offline: Mostrando dados salvos no celular
+            📡 Você está Offline. Mostrando dados salvos.
         </div>
       )}
 
@@ -105,17 +84,6 @@ export default function MeuRebanho() {
               + Novo
             </button>
         </Link>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-green-500">
-             <p className="text-xs font-bold text-gray-500 uppercase">Total</p>
-             <p className="text-2xl font-bold text-gray-800">{totalCabecas}</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-500">
-             <p className="text-xs font-bold text-gray-500 uppercase">Arrobas</p>
-             <p className="text-2xl font-bold text-gray-800">{totalArrobas} @</p>
-          </div>
       </div>
       
       <input 

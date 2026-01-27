@@ -1,7 +1,7 @@
 import Dexie, { Table } from 'dexie';
 
 export interface AnimalOffline {
-  id?: number;
+  id?: number; // O ID será gerado automaticamente
   user_id: string;
   brinco: string;
   raca: string;
@@ -16,7 +16,6 @@ export interface AnimalOffline {
   foto: string | null;
   status: string;
   criado_em?: number;
-  is_offline?: boolean;
 }
 
 export interface EventoOffline {
@@ -29,21 +28,19 @@ export interface EventoOffline {
   descricao: string;
   data: string;
   criado_em?: number;
-  is_pending?: boolean;
 }
 
 class MeuBancoLocal extends Dexie {
-  animaisPendentes!: Table<AnimalOffline>;
-  eventosPendentes!: Table<EventoOffline>;
-  animaisCache!: Table<AnimalOffline>;
+  animaisPendentes!: Table<AnimalOffline>; // Novos criados offline
+  eventosPendentes!: Table<EventoOffline>; // Vacinas/Pesagens offline
+  animaisCache!: Table<AnimalOffline>;     // Cópia dos animais da nuvem (para ver a lista offline)
 
   constructor() {
-    // MUDAMOS O NOME PARA GARANTIR LIMPEZA EM PRODUÇÃO
-    super('FaceBoi_Producao_v1'); 
+    super('FaceBoi_Final_v1'); // Nome novo para resetar tudo
     this.version(1).stores({
       animaisPendentes: '++id, user_id, criado_em',
       eventosPendentes: '++id, animal_id, criado_em',
-      animaisCache: 'id, user_id, status'
+      animaisCache: 'id, user_id, status' 
     });
   }
 }
