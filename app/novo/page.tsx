@@ -3,9 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { db } from '@/lib/db'; // <--- IMPORTANTE: Importando o banco local
+import { db } from '@/lib/db';
 
-// Função auxiliar para comprimir imagem
 const comprimirImagem = async (file: File): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -43,7 +42,6 @@ export default function NovoAnimal() {
   const [tipo, setTipo] = useState('');
   const [origem, setOrigem] = useState<'compra' | 'nascido'>('compra');
   const [dataEntrada, setDataEntrada] = useState(new Date().toISOString().split('T')[0]);
-
   const [custo, setCusto] = useState('');
   const [pai, setPai] = useState('');
   const [mae, setMae] = useState('');
@@ -54,9 +52,14 @@ export default function NovoAnimal() {
 
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) router.push('/login');
-      else setUser(user);
+      // --- CORREÇÃO OFFLINE: getSession em vez de getUser ---
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        router.push('/login');
+      } else {
+        setUser(session.user);
+      }
     };
     checkUser();
   }, [router]);
@@ -93,44 +96,49 @@ export default function NovoAnimal() {
         custo_aquisicao: origem === 'compra' ? Number(custo) : 0,
         pai: origem === 'nascido' ? pai : null,
         mae: origem === 'nascido' ? mae : null,
-        foto
+        foto,
+        status: 'ativo'
     };
 
     try {
-        // TENTA SALVAR NA NUVEM (SUPABASE)
+        // Tenta salvar na nuvem
         const { error } = await supabase.from('animais').insert([dadosAnimal]);
-        if (error) throw error; // Se der erro (ex: sem net), joga pro catch
+        if (error) throw error;
 
-        // Se deu certo (tem internet):
+        // Tenta evoluir a mãe (se tiver net)
         if (origem === 'nascido' && mae) {
-            const { data: maeData } = await supabase
-                .from('animais')
-                .select('id, tipo')
-                .eq('user_id', user.id)
-                .ilike('brinco', mae.trim()) 
-                .single();
-            if (maeData && maeData.tipo !== 'Vaca') {
-                await supabase.from('animais').update({ tipo: 'Vaca' }).eq('id', maeData.id);
-            }
+             /* Lógica da mãe (opcional offline) */
+             try {
+                const { data: maeData } = await supabase
+                    .from('animais')
+                    .select('id, tipo')
+                    .eq('user_id', user.id)
+                    .ilike('brinco', mae.trim()) 
+                    .single();
+                if (maeData && maeData.tipo !== 'Vaca') {
+                    await supabase.from('animais').update({ tipo: 'Vaca' }).eq('id', maeData.id);
+                }
+             } catch(e) {}
         }
 
         alert('Animal salvo na NUVEM! ☁️✅');
         router.push('/rebanho');
 
     } catch (erro) {
-        // SE FALHAR (SEM INTERNET) -> SALVA LOCALMENTE
-        console.log("Sem internet. Salvando localmente...");
+        console.log("Offline detectado. Salvando localmente...");
         
         try {
+          // Salva no Dexie
           await db.animaisPendentes.add({
             ...dadosAnimal,
             criado_em: Date.now()
           });
           
-          alert('Sem internet! O animal foi salvo no CELULAR 📱. Ele será enviado para a nuvem automaticamente quando o sinal voltar.');
-          router.push('/');
+          alert('Sem internet! Salvo no CELULAR 📱.');
+          router.push('/rebanho');
         } catch (e) {
-          alert("Erro grave: Não foi possível salvar nem no celular.");
+          console.error(e);
+          alert("Erro crítico ao salvar no celular.");
         }
     } finally {
         setCarregando(false);
@@ -140,7 +148,7 @@ export default function NovoAnimal() {
   const inputStyle = "w-full p-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none font-medium text-gray-900 placeholder-gray-400";
   const labelStyle = "text-xs font-bold text-gray-500 mb-1 block uppercase";
 
-  if (!user) return <div className="min-h-screen flex items-center justify-center text-green-800">Verificando...</div>;
+  if (!user) return <div className="min-h-screen flex items-center justify-center text-green-800">Carregando...</div>;
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 pb-20">
@@ -151,7 +159,6 @@ export default function NovoAnimal() {
 
       <form onSubmit={salvar} className="bg-white p-6 rounded-2xl shadow-sm space-y-5">
         
-        {/* FOTO */}
         <div className="flex justify-center">
             <label className="w-32 h-32 bg-gray-50 border-2 border-dashed border-gray-300 rounded-full flex items-center justify-center cursor-pointer overflow-hidden relative group hover:border-green-500 transition">
                 {foto ? <img src={foto} className="w-full h-full object-cover" /> : <span className="text-gray-400 font-bold text-xs text-center group-hover:text-green-600">📷 Foto</span>}
@@ -159,7 +166,6 @@ export default function NovoAnimal() {
             </label>
         </div>
 
-        {/* BRINCO E RAÇA */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className={labelStyle}>Nº Brinco *</label>
@@ -171,7 +177,6 @@ export default function NovoAnimal() {
           </div>
         </div>
 
-        {/* SEXO E CATEGORIA */}
         <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
             <label className={labelStyle}>Sexo & Categoria</label>
             <div className="flex gap-2 mb-3">
@@ -183,7 +188,6 @@ export default function NovoAnimal() {
             </select>
         </div>
 
-        {/* PESO E DATA */}
         <div className="grid grid-cols-2 gap-4">
             <div>
                 <label className={labelStyle}>Peso (Kg) *</label>
@@ -195,7 +199,6 @@ export default function NovoAnimal() {
             </div>
         </div>
 
-        {/* ORIGEM */}
         <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 transition-all duration-300">
             <label className={labelStyle}>Origem do Animal</label>
             <div className="flex gap-2 mb-4">
@@ -222,7 +225,7 @@ export default function NovoAnimal() {
         </div>
 
         <button disabled={carregando} type="submit" className="w-full bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-green-800 active:scale-95 transition disabled:opacity-50">
-            {carregando ? 'Tentando Salvar...' : 'Confirmar Cadastro'}
+            {carregando ? 'Salvando...' : 'Confirmar Cadastro'}
         </button>
       </form>
     </div>

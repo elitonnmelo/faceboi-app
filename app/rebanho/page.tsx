@@ -20,23 +20,24 @@ export default function MeuRebanho() {
   const carregarDados = async () => {
     setLoading(true);
     
-    // 1. CARREGA DADOS LOCAIS PRIMEIRO (Instantâneo)
+    // 1. CARREGA CACHE (IMEDIATO)
     const pendentes = await db.animaisPendentes.toArray();
     const cacheados = await db.animaisCache.toArray();
     
-    // Formata os pendentes
     const pendentesFormatados = pendentes.map(a => ({
         ...a, id: `temp-${a.id}`, is_offline: true, status: 'ativo'
     }));
 
-    // Mostra o que tem no celular imediatamente
     setAnimais([...pendentesFormatados, ...cacheados]);
-    setLoading(false); // Já libera a tela para o usuário
+    setLoading(false);
 
-    // 2. TENTA ATUALIZAR COM A NUVEM (Em segundo plano)
+    // 2. TENTA NUVEM
     try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        // --- CORREÇÃO OFFLINE: getSession ---
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return; // Se não tem sessão, fica com o que tem no cache
+
+        const user = session.user;
 
         const { data, error } = await supabase
             .from('animais')
@@ -47,20 +48,18 @@ export default function MeuRebanho() {
 
         if (!error && data) {
             setModoOffline(false);
-            // Atualiza a lista visual
             setAnimais([...pendentesFormatados, ...data]);
             
-            // ATUALIZA O CACHE DO CELULAR (Para a próxima vez)
-            await db.animaisCache.clear(); // Limpa cache antigo
-            await db.animaisCache.bulkPut(data); // Salva o novo
+            // ATUALIZA O CACHE PARA A PRÓXIMA VEZ
+            await db.animaisCache.clear();
+            await db.animaisCache.bulkPut(data);
         }
     } catch (e) {
-        console.log("Sem internet. Usando cache local.");
+        console.log("Sem internet. Mantendo dados do cache.");
         setModoOffline(true);
     }
   };
 
-  // Função Deletar
   async function deletar(id: string | number) {
     if (!confirm('Tem certeza?')) return;
     const idString = String(id);
@@ -72,18 +71,15 @@ export default function MeuRebanho() {
         try {
             const { error } = await supabase.from('animais').delete().eq('id', id);
             if (error) throw error;
-            // Remove do cache local também
             await db.animaisCache.delete(Number(id));
         } catch (e) {
             alert("Você precisa de internet para deletar animais da nuvem.");
             return;
         }
     }
-    // Atualiza visualmente
     setAnimais(prev => prev.filter(boi => String(boi.id) !== idString));
   }
 
-  // Filtros
   const listaFiltrada = animais.filter(boi => 
     boi.brinco?.toLowerCase().includes(busca.toLowerCase()) || 
     (boi.tipo && boi.tipo.toLowerCase().includes(busca.toLowerCase()))
@@ -153,7 +149,7 @@ export default function MeuRebanho() {
               </div>
             </Link>
         ))}
-        {listaFiltrada.length === 0 && <p className="text-center text-gray-400 mt-10">{loading ? 'Carregando...' : 'Nenhum animal encontrado.'}</p>}
+        {listaFiltrada.length === 0 && <p className="text-center text-gray-400 mt-10">Nenhum animal encontrado.</p>}
       </div>
     </div>
   );
