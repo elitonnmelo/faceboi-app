@@ -1,20 +1,31 @@
 /** @type {import('next').NextConfig} */
 const withPWA = require('next-pwa')({
   dest: 'public',
-  disable: process.env.NODE_ENV === 'development', // Desativa PWA enquanto você programa
   register: true,
   skipWaiting: true,
+  disable: false, // Garante que funciona em desenvolvimento e produção
+  runtimeCaching: [
+    {
+      // Cacheia arquivos estáticos (JS, CSS, Imagens)
+      urlPattern: /^https?.*/,
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'offlineCache',
+        expiration: {
+          maxEntries: 200,
+          maxAgeSeconds: 24 * 60 * 60 * 30 // 1 mês
+        },
+        networkTimeoutSeconds: 10, // Se a net demorar, usa o cache
+      },
+    }
+  ]
 });
 
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
-  // Ignora erros chatos na hora de subir para a Vercel
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
+  // Isso aqui ajuda a não travar a navegação
+  experimental: {
+    missingSuspenseWithCSRBailout: false,
   },
 };
 

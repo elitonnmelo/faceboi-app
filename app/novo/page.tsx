@@ -32,7 +32,6 @@ export default function NovoAnimal() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   
-  // Estados
   const [brinco, setBrinco] = useState('');
   const [raca, setRaca] = useState('');
   const [peso, setPeso] = useState('');
@@ -98,7 +97,6 @@ export default function NovoAnimal() {
         const { error } = await supabase.from('animais').insert([dadosAnimal]);
         if (error) throw error;
 
-        // Tenta evoluir a mãe se tiver net
         if (origem === 'nascido' && mae) {
              try {
                 const { data: maeData } = await supabase.from('animais').select('id, tipo').eq('user_id', user.id).ilike('brinco', mae.trim()).single();
@@ -106,17 +104,17 @@ export default function NovoAnimal() {
              } catch(e) {}
         }
 
-        alert('Animal salvo na NUVEM! ☁️✅');
-        window.location.href = '/rebanho'; // FORÇA RECARREGAMENTO
+        alert('Salvo na NUVEM! ☁️✅');
+        router.push('/rebanho'); // <--- VOLTAMOS PARA ROUTER.PUSH (NÃO TRAVA OFFLINE)
 
     } catch (erro) {
-        console.log("Offline detectado. Salvando localmente...");
+        console.log("Offline detectado.");
         try {
           await db.animaisPendentes.add({ ...dadosAnimal, criado_em: Date.now() });
           alert('Sem internet! Salvo no CELULAR 📱.');
-          window.location.href = '/rebanho'; // FORÇA RECARREGAMENTO
+          router.push('/rebanho'); // <--- VOLTAMOS PARA ROUTER.PUSH
         } catch (e) {
-          alert("Erro crítico ao salvar no celular.");
+          alert("Erro crítico.");
         }
     } finally {
         setCarregando(false);
@@ -131,7 +129,7 @@ export default function NovoAnimal() {
   return (
     <div className="min-h-screen bg-gray-100 p-4 pb-20">
       <div className="flex items-center gap-4 mb-6">
-        <button onClick={() => router.back()} className="bg-white p-2 rounded-full shadow-sm text-gray-800 font-bold">←</button>
+        <button type="button" onClick={() => router.back()} className="bg-white p-2 rounded-full shadow-sm text-gray-800 font-bold">←</button>
         <h1 className="text-xl font-bold text-gray-800">Novo Cadastro</h1>
       </div>
       <form onSubmit={salvar} className="bg-white p-6 rounded-2xl shadow-sm space-y-5">
