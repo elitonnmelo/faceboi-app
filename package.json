@@ -3,20 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-  "dev": "next dev",
-  "build": "next build --debug",
-  "start": "next start"
+    "dev": "next dev",
+    "build": "next build --debug",
+    "start": "next start"
   },
   "dependencies": {
-  "next": "14.2.3",
-  "react": "18.2.0",
-  "react-dom": "18.2.0",
-  "next-pwa": "^5.6.0",
-  "lucide-react": "latest",
-  "@supabase/supabase-js": "latest",
-  "recharts": "latest",
-  "dexie": "latest",
-  "dexie-react-hooks": "latest"
+    "@supabase/supabase-js": "latest",
+    "dexie": "^4.2.1",
+    "dexie-react-hooks": "latest",
+    "lucide-react": "latest",
+    "next": "14.2.3",
+    "next-pwa": "^5.6.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "recharts": "latest"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -1,21 +1,32 @@
 import Dexie, { Table } from 'dexie';
 
-export interface ItemFila {
+// Define o formato do dado que será salvo offline
+export interface AnimalOffline {
   id?: number;
-  tabela: 'animais' | 'eventos';
-  dados: any;
-  status: 'pendente' | 'erro';
+  user_id: string;
+  brinco: string;
+  raca: string;
+  peso_atual: number;
+  sexo: string;
+  tipo: string;
+  origem: string;
+  data_entrada: string;
+  custo_aquisicao: number;
+  pai: string | null;
+  mae: string | null;
+  foto: string | null; // Salva o Base64 da foto
+  criado_em: number; // Para ordenar
 }
 
-export class MeuBanco extends Dexie {
-  fila_sincronizacao!: Table<ItemFila>;
+class MeuBancoLocal extends Dexie {
+  animaisPendentes!: Table<AnimalOffline>;
 
   constructor() {
-    super('FaceBoiOffline');
+    super('FaceBoiOfflineDB');
     this.version(1).stores({
-      fila_sincronizacao: '++id, status' // Indexamos o status para busca rápida
+      animaisPendentes: '++id, user_id, criado_em' // Índices para busca rápida
     });
   }
 }
 
-export const dbLocal = new MeuBanco();
+export const db = new MeuBancoLocal();

@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db'; // <--- IMPORTANTE: Importando o banco local
 
-// Função auxiliar para comprimir imagem antes de salvar
+// Função auxiliar para comprimir imagem
 const comprimirImagem = async (file: File): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -32,7 +33,7 @@ export default function NovoAnimal() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   
-  // --- ESTADOS ---
+  // Estados
   const [brinco, setBrinco] = useState('');
   const [raca, setRaca] = useState('');
   const [peso, setPeso] = useState('');
@@ -48,24 +49,18 @@ export default function NovoAnimal() {
   const [mae, setMae] = useState('');
   const [carregando, setCarregando] = useState(false);
 
-  // --- LISTAS ---
   const catFemea = ['Bezerra', 'Garrota', 'Novilha', 'Vaca'];
   const catMacho = ['Bezerro', 'Garrote', 'Novilho', 'Boi', 'Touro'];
 
-  // 1. VERIFICAR SE ESTÁ LOGADO
   useEffect(() => {
     const checkUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-      } else {
-        setUser(user);
-      }
+      if (!user) router.push('/login');
+      else setUser(user);
     };
     checkUser();
   }, [router]);
 
-  // Atualiza categoria automática
   useEffect(() => {
     if (sexo === 'Femea') setTipo(catFemea[0]);
     else setTipo(catMacho[0]);
@@ -102,38 +97,41 @@ export default function NovoAnimal() {
     };
 
     try {
-        // 1. Salva o Bezerro(a)
+        // TENTA SALVAR NA NUVEM (SUPABASE)
         const { error } = await supabase.from('animais').insert([dadosAnimal]);
+        if (error) throw error; // Se der erro (ex: sem net), joga pro catch
 
-        if (error) throw error;
-
-        // 2. A MÁGICA: Atualiza a Mãe para Vaca
+        // Se deu certo (tem internet):
         if (origem === 'nascido' && mae) {
-            console.log(`Buscando a mãe (Brinco: ${mae}) para evoluir...`);
-            
-            // Busca a mãe pelo brinco (ignora maiúscula/minúscula com ilike)
             const { data: maeData } = await supabase
                 .from('animais')
                 .select('id, tipo')
                 .eq('user_id', user.id)
                 .ilike('brinco', mae.trim()) 
                 .single();
-
-            // Se achou a mãe e ela ainda não é Vaca, atualiza!
             if (maeData && maeData.tipo !== 'Vaca') {
-                await supabase
-                    .from('animais')
-                    .update({ tipo: 'Vaca' })
-                    .eq('id', maeData.id);
-                console.log("Mãe evoluída para Vaca com sucesso!");
+                await supabase.from('animais').update({ tipo: 'Vaca' }).eq('id', maeData.id);
             }
         }
 
-        alert('Nascimento registrado! A mãe foi atualizada para Vaca. 🐮✅');
+        alert('Animal salvo na NUVEM! ☁️✅');
         router.push('/rebanho');
+
     } catch (erro) {
-        console.error(erro);
-        alert('Erro ao salvar. Tente novamente.');
+        // SE FALHAR (SEM INTERNET) -> SALVA LOCALMENTE
+        console.log("Sem internet. Salvando localmente...");
+        
+        try {
+          await db.animaisPendentes.add({
+            ...dadosAnimal,
+            criado_em: Date.now()
+          });
+          
+          alert('Sem internet! O animal foi salvo no CELULAR 📱. Ele será enviado para a nuvem automaticamente quando o sinal voltar.');
+          router.push('/');
+        } catch (e) {
+          alert("Erro grave: Não foi possível salvar nem no celular.");
+        }
     } finally {
         setCarregando(false);
     }
@@ -142,7 +140,7 @@ export default function NovoAnimal() {
   const inputStyle = "w-full p-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none font-medium text-gray-900 placeholder-gray-400";
   const labelStyle = "text-xs font-bold text-gray-500 mb-1 block uppercase";
 
-  if (!user) return <div className="min-h-screen flex items-center justify-center text-green-800">Verificando acesso...</div>;
+  if (!user) return <div className="min-h-screen flex items-center justify-center text-green-800">Verificando...</div>;
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 pb-20">
@@ -176,16 +174,12 @@ export default function NovoAnimal() {
         {/* SEXO E CATEGORIA */}
         <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
             <label className={labelStyle}>Sexo & Categoria</label>
-            
             <div className="flex gap-2 mb-3">
                 <button type="button" onClick={() => setSexo('Femea')} className={`flex-1 py-2 rounded-lg font-bold transition ${sexo === 'Femea' ? 'bg-pink-100 text-pink-700 border-2 border-pink-300' : 'bg-white text-gray-500 border hover:bg-gray-100'}`}>Fêmea</button>
                 <button type="button" onClick={() => setSexo('Macho')} className={`flex-1 py-2 rounded-lg font-bold transition ${sexo === 'Macho' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300' : 'bg-white text-gray-500 border hover:bg-gray-100'}`}>Macho</button>
             </div>
-
             <select value={tipo} onChange={e => setTipo(e.target.value)} className={inputStyle}>
-                {(sexo === 'Femea' ? catFemea : catMacho).map(c => (
-                    <option key={c} value={c}>{c}</option>
-                ))}
+                {(sexo === 'Femea' ? catFemea : catMacho).map(c => <option key={c} value={c}>{c}</option>)}
             </select>
         </div>
 
@@ -201,14 +195,13 @@ export default function NovoAnimal() {
             </div>
         </div>
 
-        {/* ORIGEM (COMPRA OU NASCIMENTO) */}
+        {/* ORIGEM */}
         <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 transition-all duration-300">
             <label className={labelStyle}>Origem do Animal</label>
             <div className="flex gap-2 mb-4">
                 <button type="button" onClick={() => setOrigem('compra')} className={`flex-1 py-2 rounded-lg font-bold transition ${origem === 'compra' ? 'bg-green-100 text-green-700 border-2 border-green-300' : 'bg-white text-gray-500 border'}`}>💰 Compra</button>
                 <button type="button" onClick={() => setOrigem('nascido')} className={`flex-1 py-2 rounded-lg font-bold transition ${origem === 'nascido' ? 'bg-green-100 text-green-700 border-2 border-green-300' : 'bg-white text-gray-500 border'}`}>🏠 Nascido Aqui</button>
             </div>
-
             {origem === 'compra' ? (
                 <div className="animate-fade-in">
                     <label className={labelStyle}>Valor Pago (R$)</label>
@@ -217,26 +210,19 @@ export default function NovoAnimal() {
             ) : (
                 <div className="space-y-3 animate-fade-in">
                     <div>
-                        <label className={labelStyle}>Mãe (Brinco exato)</label>
-                        <input 
-                            type="text" 
-                            value={mae} 
-                            onChange={e => setMae(e.target.value)} 
-                            className={inputStyle} 
-                            placeholder="Ex: 105" 
-                        />
-                        <p className="text-[10px] text-gray-400 mt-1">*Se existir no sistema, ela virará Vaca automaticamente.</p>
+                        <label className={labelStyle}>Mãe (Brinco)</label>
+                        <input type="text" value={mae} onChange={e => setMae(e.target.value)} className={inputStyle} placeholder="Ex: 105" />
                     </div>
                     <div>
-                        <label className={labelStyle}>Pai (Touro/IA)</label>
+                        <label className={labelStyle}>Pai (Touro)</label>
                         <input type="text" value={pai} onChange={e => setPai(e.target.value)} className={inputStyle} placeholder="Ex: Touro 01" />
                     </div>
                 </div>
             )}
         </div>
 
-        <button disabled={carregando} type="submit" className="w-full bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-green-800 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed">
-            {carregando ? 'Salvando...' : 'Confirmar Cadastro'}
+        <button disabled={carregando} type="submit" className="w-full bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-green-800 active:scale-95 transition disabled:opacity-50">
+            {carregando ? 'Tentando Salvar...' : 'Confirmar Cadastro'}
         </button>
       </form>
     </div>
