@@ -1,8 +1,8 @@
 import Dexie, { Table } from 'dexie';
 
-// Interface para Animais (já existia)
+// Interface para Animais
 export interface AnimalOffline {
-  id?: number;
+  id?: number; // ID numérico vindo do Supabase ou ID local
   user_id: string;
   brinco: string;
   raca: string;
@@ -15,10 +15,12 @@ export interface AnimalOffline {
   pai: string | null;
   mae: string | null;
   foto: string | null;
-  criado_em: number;
+  status: string; // 'ativo' ou 'vendido'
+  criado_em?: number;
+  is_offline?: boolean; // Para sabermos se é pendente
 }
 
-// NOVA Interface para Eventos (Pesagem, Vacina, etc)
+// Interface para Eventos
 export interface EventoOffline {
   id?: number;
   animal_id: number;
@@ -28,18 +30,21 @@ export interface EventoOffline {
   custo: number | null;
   descricao: string;
   data: string;
-  criado_em: number;
+  criado_em?: number;
+  is_pending?: boolean;
 }
 
 class MeuBancoLocal extends Dexie {
-  animaisPendentes!: Table<AnimalOffline>;
-  eventosPendentes!: Table<EventoOffline>; // <--- NOVA TABELA
+  animaisPendentes!: Table<AnimalOffline>; // Novos criados offline
+  eventosPendentes!: Table<EventoOffline>; // Eventos criados offline
+  animaisCache!: Table<AnimalOffline>;     // Cópia do rebanho da nuvem (NOVO!)
 
   constructor() {
     super('FaceBoiOfflineDB');
-    this.version(2).stores({ // <--- MUDAMOS PARA VERSÃO 2
+    this.version(3).stores({ // <--- Versão 3
       animaisPendentes: '++id, user_id, criado_em',
-      eventosPendentes: '++id, animal_id, criado_em' // <--- Nova estrutura
+      eventosPendentes: '++id, animal_id, criado_em',
+      animaisCache: 'id, user_id, status' // <--- Nova Tabela
     });
   }
 }
