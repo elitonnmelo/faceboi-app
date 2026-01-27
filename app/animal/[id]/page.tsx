@@ -2,73 +2,96 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { db } from '@/lib/db'; // <--- Importamos o banco local
+import { db } from '@/lib/db';
 import { useRouter } from 'next/navigation';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const idDoAnimal = Number(params.id);
+  // O ID pode vir como "temp-1" (offline) ou "55" (nuvem)
+  const idRaw = params.id; 
+  const isOfflineId = idRaw.startsWith('temp-');
+  const idNumerico = Number(idRaw.replace('temp-', ''));
 
-  // Estados
   const [animal, setAnimal] = useState<any>(null);
   const [eventos, setEventos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Estados de Formulário
+  // Estados Form
   const [novoEvento, setNovoEvento] = useState('');
   const [tipoEvento, setTipoEvento] = useState('observacao');
   const [valorInput, setValorInput] = useState('');
   
-  // Estados Visuais
+  // Visuais
   const [verFoto, setVerFoto] = useState(false);
   const [modalVenda, setModalVenda] = useState(false);
   const [precoVenda, setPrecoVenda] = useState('');
 
   const carregarDados = async () => {
+    setLoading(true);
     try {
-      // 1. Carrega Animal
-      const { data: animalData, error: animalError } = await supabase
-        .from('animais').select('*').eq('id', idDoAnimal).single();
+      let dadosAnimal = null;
+      let dadosEventos: any[] = [];
+
+      if (isOfflineId) {
+        // --- MODO OFFLINE (Busca no Celular) ---
+        dadosAnimal = await db.animaisPendentes.get(idNumerico);
+        if (dadosAnimal) {
+            dadosAnimal.status = 'ativo'; // Padrão
+            dadosAnimal.is_offline = true;
+        }
+        // Busca eventos locais (Obs: Eventos offline em animais offline são difíceis de linkar, mas mostramos o que der)
+        // Por simplificação, animais offline novos mostram histórico vazio até sincronizar
+      } else {
+        // --- MODO ONLINE (Busca na Nuvem) ---
+        // 1. Tenta Nuvem
+        const { data, error } = await supabase.from('animais').select('*').eq('id', idNumerico).single();
+        
+        if (error || !data) {
+           // Se falhar na nuvem, tenta ver se não está no cache offline (caso tenha caído a net agora)
+           // Mas aqui focamos no fluxo principal
+           throw error;
+        }
+        dadosAnimal = data;
+        
+        // 2. Busca Eventos da Nuvem
+        const { data: evNuvem } = await supabase.from('eventos').select('*').eq('animal_id', idNumerico).order('data', { ascending: true });
+        dadosEventos = evNuvem || [];
+
+        // 3. Busca Eventos Pendentes no Celular (Mistura)
+        const evOffline = await db.eventosPendentes.where('animal_id').equals(idNumerico).toArray();
+        const evOfflineFormatados = evOffline.map(e => ({...e, id: `temp-${e.id}`, is_pending: true }));
+        
+        dadosEventos = [...dadosEventos, ...evOfflineFormatados];
+      }
+
+      if (!dadosAnimal) throw new Error("Animal não encontrado");
       
-      if (animalError) throw animalError;
-      setAnimal(animalData);
-
-      // 2. Carrega Eventos da Nuvem
-      const { data: eventosNuvem } = await supabase
-        .from('eventos').select('*').eq('animal_id', idDoAnimal).order('data', { ascending: true });
-
-      setEventos(eventosNuvem || []);
+      setAnimal(dadosAnimal);
+      setEventos(dadosEventos);
 
     } catch (error) {
       console.error(error);
-      // Se der erro ao carregar (offline), tenta mostrar o que tem cacheado ou avisa
-      alert('Modo Offline: Algumas informações podem estar desatualizadas.');
+      alert('Não foi possível carregar os detalhes (Verifique a conexão ou se o animal foi deletado).');
+      router.push('/rebanho');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (idDoAnimal) carregarDados();
-  }, [idDoAnimal]);
+    carregarDados();
+  }, [idRaw]);
 
-
-  // PREPARAR GRÁFICO
-  const dadosGrafico = eventos
-    ?.filter(e => e.tipo === 'pesagem')
-    .map(e => ({
-      data: new Date(e.data).toLocaleDateString().slice(0, 5),
-      peso: e.valor
-    }));
-  
-  const custoTotal = (animal?.custo_aquisicao || 0) + (eventos?.reduce((acc, e) => acc + (e.custo || 0), 0) || 0);
-  const lucro = animal?.valor_venda ? (animal.valor_venda - custoTotal) : 0;
-
-  // --- FUNÇÃO INTELIGENTE DE SALVAR EVENTOS ---
+  // --- ADICIONAR EVENTO ---
   async function adicionarEvento(e: React.FormEvent) {
     e.preventDefault();
-    if (animal?.status === 'vendido') return;
+    
+    // AVISO DE SEGURANÇA PARA ANIMAIS OFFLINE
+    if (isOfflineId) {
+        alert("⚠️ Aviso: Este animal ainda não foi enviado para a nuvem.\nAguarde a sincronização automática (assim que tiver internet) para adicionar eventos a ele.");
+        return;
+    }
 
     let descricaoFinal = novoEvento;
     let valorFinal: number | null = null;
@@ -87,9 +110,9 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
 
     const { data: { user } } = await supabase.auth.getUser();
 
-    const novoObjetoEvento = {
+    const novoObjeto = {
       user_id: user?.id,
-      animal_id: idDoAnimal,
+      animal_id: idNumerico,
       tipo: tipoEvento,
       descricao: descricaoFinal,
       data: new Date().toISOString(),
@@ -98,31 +121,28 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     };
 
     try {
-        // 1. Tenta salvar na Nuvem
-        const { error } = await supabase.from('eventos').insert([novoObjetoEvento]);
+        // Tenta Nuvem
+        const { error } = await supabase.from('eventos').insert([novoObjeto]);
         if (error) throw error;
 
-        // Se for pesagem e estiver online, atualiza o animal também
         if (tipoEvento === 'pesagem' && valorFinal) {
-            await supabase.from('animais').update({ peso_atual: valorFinal }).eq('id', idDoAnimal);
+            await supabase.from('animais').update({ peso_atual: valorFinal }).eq('id', idNumerico);
         }
 
-        alert('Salvo na nuvem! ☁️');
-        carregarDados(); // Recarrega tela
+        alert('Evento Salvo! ☁️');
+        carregarDados(); 
     } catch (error) {
-        // 2. Se falhar (Sem Internet), salva no Celular
-        console.log("Offline. Salvando evento localmente...");
-        
+        // Salva Offline (Só funciona para animais que JÁ têm ID na nuvem)
+        console.log("Salvando evento offline...");
         await db.eventosPendentes.add({
-            ...novoObjetoEvento,
+            ...novoObjeto,
             user_id: user?.id || 'offline',
             criado_em: Date.now()
         });
-
-        alert('Sem internet! Evento salvo no CELULAR 📱. Será sincronizado depois.');
+        alert('Sem internet! Evento salvo no celular 📱.');
         
-        // Atualiza a tela visualmente para o usuário não achar que travou
-        setEventos([...eventos, { ...novoObjetoEvento, id: 'temp-' + Date.now() }]);
+        // Atualiza visualmente
+        setEventos([...eventos, { ...novoObjeto, id: 'temp-'+Date.now(), is_pending: true }]);
         if(valorFinal) setAnimal({...animal, peso_atual: valorFinal});
     }
 
@@ -131,55 +151,21 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     setTipoEvento('observacao');
   }
 
-  // Ações de Foto e Venda (Mantidas simples)
-  const atualizarFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        await supabase.from('animais').update({ foto: reader.result as string }).eq('id', idDoAnimal);
-        setAnimal({ ...animal, foto: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  // PREPARAR GRÁFICO
+  const dadosGrafico = eventos
+    ?.filter(e => e.tipo === 'pesagem')
+    .map(e => ({
+      data: new Date(e.data).toLocaleDateString().slice(0, 5),
+      peso: e.valor
+    }));
+  
+  const custoTotal = (animal?.custo_aquisicao || 0) + (eventos?.reduce((acc, e) => acc + (e.custo || 0), 0) || 0);
 
-  async function realizarVenda(e: React.FormEvent) {
-    e.preventDefault();
-    if (!precoVenda || !confirm('Confirmar a venda?')) return;
-    
-    // Venda é algo crítico, melhor exigir internet por enquanto ou implementar lógica complexa
-    try {
-        await supabase.from('animais').update({ status: 'vendido', valor_venda: Number(precoVenda) }).eq('id', idDoAnimal);
-        alert("Venda realizada!");
-        carregarDados();
-        setModalVenda(false);
-    } catch (e) {
-        alert("Para vender (mudar status), você precisa de internet no momento.");
-    }
-  }
-
-  if (loading || !animal) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando ficha...</div>;
+  if (loading || !animal) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando...</div>;
 
   return (
     <div className="min-h-screen bg-gray-100 pb-20">
       
-      {/* MODAL VENDA */}
-      {modalVenda && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl">
-                <h2 className="text-xl font-bold text-gray-800 mb-4">💰 Vender Animal</h2>
-                <form onSubmit={realizarVenda}>
-                    <input type="number" autoFocus value={precoVenda} onChange={e => setPrecoVenda(e.target.value)} className="w-full p-4 text-2xl font-bold text-green-700 border-2 border-green-500 rounded-xl mb-4 outline-none" placeholder="R$ 0,00" />
-                    <div className="flex gap-2">
-                        <button type="button" onClick={() => setModalVenda(false)} className="flex-1 py-3 bg-gray-200 text-gray-700 font-bold rounded-xl">Cancelar</button>
-                        <button type="submit" className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">Confirmar</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-      )}
-
       {/* ZOOM FOTO */}
       {verFoto && animal.foto && (
         <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-2 cursor-pointer backdrop-blur-sm" onClick={() => setVerFoto(false)}>
@@ -197,15 +183,10 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         
         <button onClick={() => router.back()} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow text-black font-bold z-10 hover:bg-gray-200">←</button>
         
-        {animal.status === 'ativo' && (
-            <label className="absolute top-4 right-4 bg-white p-3 rounded-full shadow cursor-pointer z-10 hover:bg-gray-200 active:scale-95 transition">
-                <span className="text-xl">📷</span>
-                <input type="file" accept="image/*" className="hidden" onChange={atualizarFoto} />
-            </label>
-        )}
-
-        {animal.status === 'vendido' && (
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 border-4 border-red-500 text-red-500 px-6 py-2 text-4xl font-black uppercase tracking-widest rotate-[-15deg] opacity-80 z-20 bg-white/10 backdrop-blur-sm rounded-lg">VENDIDO</div>
+        {animal.is_offline && (
+             <div className="absolute top-4 right-4 bg-yellow-400 text-black px-3 py-1 rounded-full font-bold text-xs shadow-lg animate-pulse">
+                SALVO NO CELULAR 📱
+             </div>
         )}
 
         <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-5 pt-20 pointer-events-none">
@@ -246,17 +227,10 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
             </div>
         )}
 
-        {/* BOTÃO DE VENDA */}
-        {animal.status === 'ativo' && (
-            <button onClick={() => setModalVenda(true)} className="w-full py-4 bg-green-100 text-green-800 font-bold rounded-xl border-2 border-green-200 hover:bg-green-200 transition flex items-center justify-center gap-2">
-                <span>💰</span> Registrar Venda
-            </button>
-        )}
-
         {/* REGISTRO DE EVENTOS */}
         {animal.status === 'ativo' && (
             <div className="bg-white p-4 rounded-xl shadow-sm border-2 border-green-500/20">
-                <h3 className="font-bold text-gray-700 mb-3">Novo Evento (Funciona Offline 📶)</h3>
+                <h3 className="font-bold text-gray-700 mb-3">Novo Evento</h3>
                 <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
                     {['observacao', 'vacina', 'medicamento', 'pesagem'].map(t => (
                         <button key={t} onClick={() => setTipoEvento(t)} className={`px-3 py-2 rounded-lg text-sm font-bold capitalize transition-colors ${tipoEvento === t ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-800'}`}>{t}</button>
@@ -277,14 +251,14 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         {/* HISTÓRICO */}
         <div className="space-y-2">
             {eventos?.slice().reverse().map(ev => (
-                <div key={ev.id} className="bg-white p-3 rounded-lg flex justify-between items-center text-sm shadow-sm border border-gray-100">
+                <div key={ev.id} className={`bg-white p-3 rounded-lg flex justify-between items-center text-sm shadow-sm border ${ev.is_pending ? 'border-yellow-300 bg-yellow-50' : 'border-gray-100'}`}>
                     <div>
                         <span className="font-bold mr-2 text-xs uppercase text-gray-500">{ev.tipo}</span>
                         <span className="text-gray-900 font-medium">{ev.descricao}</span>
                     </div>
                     <div className="text-right">
                         <div className="text-gray-400 text-xs">{new Date(ev.data).toLocaleDateString()}</div>
-                        {String(ev.id).startsWith('temp-') && <span className="text-[10px] bg-yellow-200 px-1 rounded font-bold text-yellow-800">PENDENTE</span>}
+                        {ev.is_pending && <span className="text-[10px] bg-yellow-200 px-1 rounded font-bold text-yellow-800">PENDENTE</span>}
                     </div>
                 </div>
             ))}
