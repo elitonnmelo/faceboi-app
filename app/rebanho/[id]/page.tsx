@@ -2,87 +2,120 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { db } from '@/lib/db';
 import { useRouter } from 'next/navigation';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
+// Função auxiliar para garantir que a foto não fique gigante no banco
+const comprimirImagem = async (file: File): Promise<string> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800; // Qualidade boa
+        const scaleSize = MAX_WIDTH / img.width;
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scaleSize;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        }
+      };
+    };
+  });
+};
+
 export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const idRaw = params.id; 
-  const isOfflineId = idRaw.startsWith('temp-');
-  const idNumerico = Number(idRaw.replace('temp-', ''));
+  const idDoAnimal = Number(params.id);
 
+  // Estados de Dados
   const [animal, setAnimal] = useState<any>(null);
   const [eventos, setEventos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Estados Form
+  // Estados de Formulário (Eventos)
   const [novoEvento, setNovoEvento] = useState('');
   const [tipoEvento, setTipoEvento] = useState('pesagem');
   const [valorInput, setValorInput] = useState('');
   
-  const [verFoto, setVerFoto] = useState(false);
+  // Estados Visuais (Foto e Venda)
+  const [verFoto, setVerFoto] = useState(false); // <--- Estado para o ZOOM
   const [modalVenda, setModalVenda] = useState(false);
   const [precoVenda, setPrecoVenda] = useState('');
 
+  // 1. CARREGAR DADOS DA NUVEM
   const carregarDados = async () => {
-    setLoading(true);
     try {
-      let dadosAnimal = null;
-      let dadosEventos: any[] = [];
-
-      if (isOfflineId) {
-        // --- ANIMAL NOVO (PENDENTE) ---
-        dadosAnimal = await db.animaisPendentes.get(idNumerico);
-        if (dadosAnimal) {
-            dadosAnimal.status = 'ativo';
-            dadosAnimal.is_offline = true;
-        }
-      } else {
-        // --- ANIMAL ANTIGO (NUVEM OU CACHE) ---
-        // 1. Tenta Nuvem
-        const { data, error } = await supabase.from('animais').select('*').eq('id', idNumerico).single();
-        
-        if (!error && data) {
-           dadosAnimal = data;
-           // Carrega eventos da nuvem
-           const { data: evNuvem } = await supabase.from('eventos').select('*').eq('animal_id', idNumerico).order('data', { ascending: true });
-           dadosEventos = evNuvem || [];
-        } else {
-           // 2. Falhou nuvem? Pega do Cache Offline
-           console.log("Buscando animal antigo no cache offline...");
-           dadosAnimal = await db.animaisCache.get(idNumerico);
-        }
-
-        // Busca também eventos que você criou offline para esse boi antigo
-        const evOffline = await db.eventosPendentes.where('animal_id').equals(idNumerico).toArray();
-        const evOfflineFormatados = evOffline.map(e => ({...e, id: `temp-${e.id}`, is_pending: true }));
-        dadosEventos = [...dadosEventos, ...evOfflineFormatados];
-      }
-
-      if (!dadosAnimal) throw new Error("Animal não encontrado");
+      const { data: animalData, error: animalError } = await supabase
+        .from('animais')
+        .select('*')
+        .eq('id', idDoAnimal)
+        .single();
       
-      setAnimal(dadosAnimal);
-      setEventos(dadosEventos);
+      if (animalError) throw animalError;
+      setAnimal(animalData);
+
+      const { data: eventosData } = await supabase
+        .from('eventos')
+        .select('*')
+        .eq('animal_id', idDoAnimal)
+        .order('data', { ascending: true });
+
+      setEventos(eventosData || []);
 
     } catch (error) {
-      alert('Erro ao carregar animal. Verifique se ele foi deletado.');
+      console.error(error);
+      alert('Erro ao carregar detalhes.');
       router.push('/rebanho');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { carregarDados(); }, [idRaw]);
+  useEffect(() => {
+    if (idDoAnimal) carregarDados();
+  }, [idDoAnimal]);
 
-  // --- ADICIONAR EVENTO (ATUALIZAR FICHA) ---
+  // --- FUNÇÃO DE ATUALIZAR FOTO ---
+  const atualizarFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+          // 1. Comprime a imagem
+          const fotoBase64 = await comprimirImagem(file);
+          
+          // 2. Atualiza no Banco de Dados
+          const { error } = await supabase
+            .from('animais')
+            .update({ foto: fotoBase64 })
+            .eq('id', idDoAnimal);
+
+          if (error) throw error;
+
+          // 3. Atualiza na tela imediatamente
+          setAnimal({ ...animal, foto: fotoBase64 });
+          alert("Foto atualizada com sucesso! 📸");
+
+      } catch (error) {
+          alert("Erro ao salvar a foto. Tente novamente.");
+      }
+    }
+  };
+
+  // --- FUNÇÃO ADICIONAR EVENTO ---
   async function adicionarEvento(e: React.FormEvent) {
     e.preventDefault();
-    
+    if (animal?.status === 'vendido') return;
+
     let descricaoFinal = novoEvento;
     let valorFinal: number | null = null;
     let custoFinal: number | null = null;
-    const valorCorrigido = valorInput.replace(',', '.'); // Corrige vírgula
+    const valorCorrigido = valorInput.replace(',', '.');
 
     if (tipoEvento === 'pesagem') {
         if (!valorInput) return alert('Informe o peso');
@@ -95,72 +128,55 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     } 
     else if (!novoEvento) return;
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const userId = session?.user?.id || 'offline';
+    const { data: { user } } = await supabase.auth.getUser();
 
-    const novoObjeto = {
-      user_id: userId,
-      animal_id: idNumerico,
+    // Salva na nuvem
+    const { error } = await supabase.from('eventos').insert([{
+      user_id: user?.id,
+      animal_id: idDoAnimal,
       tipo: tipoEvento,
       descricao: descricaoFinal,
       data: new Date().toISOString(),
       valor: valorFinal,
       custo: custoFinal
-    };
+    }]);
 
-    try {
-        if (isOfflineId) throw new Error("Animal offline"); 
-
-        // Tenta Nuvem
-        const { error } = await supabase.from('eventos').insert([novoObjeto]);
-        if (error) throw error;
-
+    if (!error) {
+        // Se for pesagem, atualiza o peso atual do boi
         if (tipoEvento === 'pesagem' && valorFinal) {
-            await supabase.from('animais').update({ peso_atual: valorFinal }).eq('id', idNumerico);
-            await db.animaisCache.update(idNumerico, { peso_atual: valorFinal }); // Atualiza Cache
-        }
-
-        alert('Salvo na nuvem! ☁️');
-        // Atualiza tela na hora
-        setEventos([...eventos, { ...novoObjeto, id: Date.now() }]);
-        if (valorFinal) setAnimal({ ...animal, peso_atual: valorFinal });
-
-    } catch (error) {
-        // Salva Offline
-        await db.eventosPendentes.add({
-            ...novoObjeto,
-            criado_em: Date.now()
-        });
-        alert('Sem internet! Salvo no celular 📱.');
-        
-        // Atualiza tela na hora
-        setEventos([...eventos, { ...novoObjeto, id: 'temp-'+Date.now(), is_pending: true }]);
-        if (valorFinal) {
+            await supabase.from('animais').update({ peso_atual: valorFinal }).eq('id', idDoAnimal);
             setAnimal({ ...animal, peso_atual: valorFinal });
-            // Se for animal antigo, atualiza o cache dele para refletir o novo peso offline
-            if (!isOfflineId) await db.animaisCache.update(idNumerico, { peso_atual: valorFinal });
-            else await db.animaisPendentes.update(idNumerico, { peso_atual: valorFinal });
         }
+        alert("Evento salvo!");
+        carregarDados(); // Recarrega histórico
+        setNovoEvento('');
+        setValorInput('');
     }
-
-    setNovoEvento('');
-    setValorInput('');
-    setTipoEvento('observacao');
   }
 
-  // Venda
+  // Lógica de Venda
   async function realizarVenda(e: React.FormEvent) {
     e.preventDefault();
-    if (!precoVenda) return;
-    try {
-        await supabase.from('animais').update({ status: 'vendido', valor_venda: Number(precoVenda) }).eq('id', idNumerico);
-        await db.animaisCache.delete(idNumerico);
-        setAnimal({...animal, status: 'vendido'});
-        setModalVenda(false);
-    } catch(e) { alert("Precisa de internet para vender."); }
+    if (!precoVenda) return alert('Informe o valor');
+    if(!confirm('Confirmar venda?')) return;
+
+    await supabase.from('animais').update({
+        status: 'vendido',
+        valor_venda: Number(precoVenda)
+    }).eq('id', idDoAnimal);
+
+    setModalVenda(false);
+    carregarDados();
   }
 
-  const dadosGrafico = eventos?.filter(e => e.tipo === 'pesagem').map(e => ({ data: new Date(e.data).toLocaleDateString().slice(0, 5), peso: e.valor }));
+  // Cálculos para Gráfico e Financeiro
+  const dadosGrafico = eventos
+    ?.filter(e => e.tipo === 'pesagem')
+    .map(e => ({
+      data: new Date(e.data).toLocaleDateString().slice(0, 5),
+      peso: e.valor
+    }));
+  
   const custoTotal = (animal?.custo_aquisicao || 0) + (eventos?.reduce((acc, e) => acc + (e.custo || 0), 0) || 0);
 
   if (loading || !animal) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando...</div>;
@@ -168,6 +184,22 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   return (
     <div className="min-h-screen bg-gray-100 pb-20">
       
+      {/* --- MODAL DE ZOOM DA FOTO (AQUI ESTÁ A LÓGICA DE VER A FOTO) --- */}
+      {verFoto && animal.foto && (
+        <div 
+            className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center p-4 cursor-pointer backdrop-blur-sm" 
+            onClick={() => setVerFoto(false)} // Fecha ao clicar fora ou na imagem
+        >
+            <img 
+                src={animal.foto} 
+                className="max-w-full max-h-full rounded-lg shadow-2xl object-contain animate-fade-in" 
+                alt="Foto do Animal em Zoom"
+            />
+            <button className="absolute top-4 right-4 text-white text-4xl font-bold">&times;</button>
+        </div>
+      )}
+
+      {/* MODAL VENDA */}
       {modalVenda && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl">
@@ -183,17 +215,34 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {/* CABEÇALHO */}
+      {/* CABEÇALHO COM FOTO */}
       <div className="relative h-72 bg-gray-900 group">
         {animal.foto ? (
-            <img src={animal.foto} onClick={() => setVerFoto(true)} className={`w-full h-full object-cover opacity-80`} />
+            // Ao clicar na imagem, ativa o verFoto(true)
+            <img 
+                src={animal.foto} 
+                onClick={() => setVerFoto(true)} 
+                className={`w-full h-full object-cover cursor-pointer transition duration-300 ${animal.status === 'vendido' ? 'grayscale opacity-50' : 'opacity-80 hover:opacity-100'}`} 
+            />
         ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-600 text-6xl">🐮</div>
         )}
         
         <button onClick={() => router.back()} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow text-black font-bold z-10 hover:bg-gray-200">←</button>
-        {animal.is_offline && <div className="absolute top-4 right-4 bg-yellow-400 text-black px-3 py-1 rounded-full font-bold text-xs shadow-lg">PENDENTE</div>}
-        {animal.status === 'vendido' && <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 border-4 border-red-500 text-red-500 px-6 py-2 text-4xl font-black uppercase rotate-[-15deg] z-20 bg-white/10 backdrop-blur-sm rounded-lg">VENDIDO</div>}
+        
+        {/* BOTÃO PARA TROCAR FOTO */}
+        {animal.status === 'ativo' && (
+            <label className="absolute top-4 right-4 bg-white p-3 rounded-full shadow cursor-pointer z-10 hover:bg-gray-200 active:scale-95 transition">
+                <span className="text-xl">📷</span>
+                <input type="file" accept="image/*" className="hidden" onChange={atualizarFoto} />
+            </label>
+        )}
+
+        {animal.status === 'vendido' && (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 border-4 border-red-500 text-red-500 px-6 py-2 text-4xl font-black uppercase tracking-widest rotate-[-15deg] opacity-80 z-20 bg-white/10 backdrop-blur-sm rounded-lg">
+                VENDIDO
+            </div>
+        )}
 
         <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-5 pt-20 pointer-events-none">
             <h1 className="text-4xl font-bold text-white drop-shadow-md">Brinco {animal.brinco}</h1>
@@ -218,34 +267,43 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         {/* GRÁFICO */}
         {dadosGrafico && dadosGrafico.length > 1 && (
             <div className="bg-white p-4 rounded-xl shadow-sm h-48">
-                 <ResponsiveContainer width="100%" height="100%"><LineChart data={dadosGrafico}><XAxis dataKey="data" style={{ fontSize: '12px' }} /><YAxis domain={['auto', 'auto']} style={{ fontSize: '12px' }} /><Tooltip /><Line type="monotone" dataKey="peso" stroke="#16a34a" strokeWidth={3} dot={{r: 4}} /></LineChart></ResponsiveContainer>
+                <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={dadosGrafico}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="data" style={{ fontSize: '12px' }} />
+                        <YAxis domain={['auto', 'auto']} style={{ fontSize: '12px' }} />
+                        <Tooltip contentStyle={{backgroundColor: 'white', color: 'black'}} />
+                        <Line type="monotone" dataKey="peso" stroke="#16a34a" strokeWidth={3} dot={{r: 4}} />
+                    </LineChart>
+                </ResponsiveContainer>
             </div>
         )}
 
         {/* BOTÃO DE VENDA */}
         {animal.status === 'ativo' && (
-            <button onClick={() => setModalVenda(true)} className="w-full py-4 bg-green-100 text-green-800 font-bold rounded-xl border-2 border-green-200 hover:bg-green-200 transition flex items-center justify-center gap-2">
+            <button 
+                onClick={() => setModalVenda(true)}
+                className="w-full py-4 bg-green-100 text-green-800 font-bold rounded-xl border-2 border-green-200 hover:bg-green-200 transition flex items-center justify-center gap-2"
+            >
                 <span>💰</span> Registrar Venda
             </button>
         )}
 
-        {/* REGISTRO DE EVENTOS (ATUALIZAR FICHA) */}
+        {/* REGISTRO DE EVENTOS */}
         {animal.status === 'ativo' && (
             <div className="bg-white p-4 rounded-xl shadow-sm border-2 border-green-500/20">
-                <h3 className="font-bold text-gray-700 mb-3">Atualizar Ficha</h3>
+                <h3 className="font-bold text-gray-700 mb-3">Novo Evento</h3>
                 <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
                     {['pesagem', 'vacina', 'medicamento', 'observacao'].map(t => (
                         <button key={t} onClick={() => setTipoEvento(t)} className={`px-3 py-2 rounded-lg text-sm font-bold capitalize transition-colors ${tipoEvento === t ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-800'}`}>{t}</button>
                     ))}
                 </div>
-                <div className="flex flex-col gap-2">
-                    <div className="flex gap-2">
-                        {(tipoEvento === 'pesagem' || tipoEvento === 'vacina' || tipoEvento === 'medicamento') && (
-                            <input type="text" placeholder={tipoEvento === 'pesagem' ? 'Kg' : 'R$'} value={valorInput} onChange={e => setValorInput(e.target.value)} className="w-24 p-2 border-2 border-gray-300 rounded-lg outline-none font-bold" />
-                        )}
-                        <input type="text" placeholder="Descrição..." value={novoEvento} onChange={e => setNovoEvento(e.target.value)} className="flex-1 p-2 border-2 border-gray-300 rounded-lg outline-none" />
-                    </div>
-                    <button onClick={adicionarEvento} className="bg-green-600 text-white py-3 rounded-lg font-bold shadow hover:bg-green-700 w-full">Salvar</button>
+                <div className="flex gap-2">
+                    {(tipoEvento === 'pesagem' || tipoEvento === 'vacina' || tipoEvento === 'medicamento') && (
+                        <input type="text" placeholder={tipoEvento === 'pesagem' ? 'Kg' : 'R$'} value={valorInput} onChange={e => setValorInput(e.target.value)} className="w-24 p-2 border-2 border-gray-300 rounded-lg outline-none font-bold" />
+                    )}
+                    <input type="text" placeholder="Descrição..." value={novoEvento} onChange={e => setNovoEvento(e.target.value)} className="flex-1 p-2 border-2 border-gray-300 rounded-lg outline-none" />
+                    <button onClick={adicionarEvento} className="bg-green-600 text-white px-4 rounded-lg font-bold shadow hover:bg-green-700">→</button>
                 </div>
             </div>
         )}
@@ -253,12 +311,19 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         {/* HISTÓRICO */}
         <div className="space-y-2">
             {eventos?.slice().reverse().map(ev => (
-                <div key={ev.id} className={`bg-white p-3 rounded-lg flex justify-between items-center text-sm shadow-sm border ${ev.is_pending ? 'border-yellow-300 bg-yellow-50' : 'border-gray-100'}`}>
-                    <div><span className="font-bold mr-2 text-xs uppercase text-gray-500">{ev.tipo}</span><span className="text-gray-900 font-medium">{ev.descricao}</span></div>
-                    <div className="text-right"><div className="text-gray-400 text-xs">{new Date(ev.data).toLocaleDateString()}</div>{ev.is_pending && <span className="text-[10px] bg-yellow-200 px-1 rounded font-bold text-yellow-800">PENDENTE</span>}</div>
+                <div key={ev.id} className="bg-white p-3 rounded-lg flex justify-between items-center text-sm shadow-sm border border-gray-100">
+                    <div>
+                        <span className="font-bold mr-2 text-xs uppercase text-gray-500">{ev.tipo}</span>
+                        <span className="text-gray-900 font-medium">{ev.descricao}</span>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-gray-400 text-xs">{new Date(ev.data).toLocaleDateString()}</div>
+                        {ev.custo && <div className="text-red-600 font-bold text-xs">- R$ {ev.custo}</div>}
+                    </div>
                 </div>
             ))}
         </div>
+
       </div>
     </div>
   );
