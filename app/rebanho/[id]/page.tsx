@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
-// Função auxiliar para comprimir imagem
 const comprimirImagem = async (file: File): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -47,7 +46,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   const [modalVenda, setModalVenda] = useState(false);
   const [precoVenda, setPrecoVenda] = useState('');
 
-  // CARREGAR DADOS
   const carregarDados = async () => {
     try {
       const { data: animalData, error: animalError } = await supabase
@@ -79,28 +77,21 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     if (idDoAnimal) carregarDados();
   }, [idDoAnimal]);
 
-  // --- FUNÇÃO DELETAR (NOVA) ---
   const deletarAnimal = async () => {
     const confirmacao = window.confirm(`Tem certeza que deseja EXCLUIR o animal Brinco ${animal.brinco}? Essa ação não tem volta.`);
     if (!confirmacao) return;
 
     try {
-        // Primeiro apaga os eventos para não dar erro de vínculo
         await supabase.from('eventos').delete().eq('animal_id', idDoAnimal);
-        
-        // Depois apaga o animal
         const { error } = await supabase.from('animais').delete().eq('id', idDoAnimal);
-        
         if (error) throw error;
-
         alert('Animal excluído com sucesso.');
-        router.push('/rebanho'); // Volta para a lista
+        router.push('/rebanho');
     } catch (error) {
         alert('Erro ao excluir. Verifique sua conexão.');
     }
   };
 
-  // ATUALIZAR FOTO
   const atualizarFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -114,7 +105,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     }
   };
 
-  // ADICIONAR EVENTO
   async function adicionarEvento(e: React.FormEvent) {
     e.preventDefault();
     if (animal?.status === 'vendido') return;
@@ -158,7 +148,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     }
   }
 
-  // VENDA
   async function realizarVenda(e: React.FormEvent) {
     e.preventDefault();
     if (!precoVenda) return alert('Informe o valor');
@@ -175,13 +164,21 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   if (loading || !animal) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-20">
+    // CORREÇÃO 1: overflow-x-hidden impede a tela de "sambar" para os lados
+    <div className="min-h-screen bg-gray-100 pb-20 overflow-x-hidden w-full relative">
       
       {/* ZOOM FOTO */}
       {verFoto && animal.foto && (
         <div className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center p-4 cursor-pointer backdrop-blur-sm" onClick={() => setVerFoto(false)}>
             <img src={animal.foto} className="max-w-full max-h-full rounded-lg shadow-2xl object-contain animate-fade-in" />
-            <button className="absolute top-4 right-4 text-white text-4xl font-bold">&times;</button>
+            
+            {/* CORREÇÃO 2: Botão Fixed para garantir que aparece na tela */}
+            <button 
+                onClick={(e) => { e.stopPropagation(); setVerFoto(false); }}
+                className="fixed top-6 right-6 bg-white/20 text-white w-10 h-10 rounded-full flex items-center justify-center text-xl font-bold backdrop-blur-md z-[10000]"
+            >
+                ✕
+            </button>
         </div>
       )}
 
@@ -202,26 +199,17 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
       )}
 
       {/* CABEÇALHO */}
-      <div className="relative h-72 bg-gray-900 group">
+      <div className="relative h-72 bg-gray-900 group w-full">
         {animal.foto ? (
             <img src={animal.foto} onClick={() => setVerFoto(true)} className={`w-full h-full object-cover cursor-pointer transition duration-300 ${animal.status === 'vendido' ? 'grayscale opacity-50' : 'opacity-80 hover:opacity-100'}`} />
         ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-600 text-6xl">🐮</div>
         )}
         
-        {/* BOTÃO VOLTAR */}
         <button onClick={() => router.back()} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow text-black font-bold z-10 hover:bg-gray-200">←</button>
         
-        {/* BOTÃO EXCLUIR (NOVO) - Lado direito superior */}
-        <button 
-            onClick={deletarAnimal} 
-            className="absolute top-4 right-4 bg-red-100 p-2 rounded-full shadow text-red-600 font-bold z-10 hover:bg-red-200 border-2 border-red-200"
-            title="Excluir Animal"
-        >
-            🗑️
-        </button>
+        <button onClick={deletarAnimal} className="absolute top-4 right-4 bg-red-100 p-2 rounded-full shadow text-red-600 font-bold z-10 hover:bg-red-200 border-2 border-red-200">🗑️</button>
 
-        {/* BOTÃO FOTO - Um pouco mais abaixo do excluir */}
         {animal.status === 'ativo' && (
             <label className="absolute top-16 right-4 bg-white p-3 rounded-full shadow cursor-pointer z-10 hover:bg-gray-200 active:scale-95 transition">
                 <span className="text-xl">📷</span>
@@ -230,9 +218,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         )}
 
         {animal.status === 'vendido' && (
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 border-4 border-red-500 text-red-500 px-6 py-2 text-4xl font-black uppercase tracking-widest rotate-[-15deg] opacity-80 z-20 bg-white/10 backdrop-blur-sm rounded-lg">
-                VENDIDO
-            </div>
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 border-4 border-red-500 text-red-500 px-6 py-2 text-4xl font-black uppercase tracking-widest rotate-[-15deg] opacity-80 z-20 bg-white/10 backdrop-blur-sm rounded-lg">VENDIDO</div>
         )}
 
         <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-5 pt-10 pointer-events-none">
@@ -280,7 +266,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
 
         {/* GRÁFICO */}
         {dadosGrafico && dadosGrafico.length > 1 && (
-            <div className="bg-white p-4 rounded-xl shadow-sm h-48">
+            <div className="bg-white p-4 rounded-xl shadow-sm h-48 w-full overflow-hidden">
                 <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={dadosGrafico}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -305,11 +291,11 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
 
         {/* REGISTRO DE EVENTOS */}
         {animal.status === 'ativo' && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border-2 border-green-500/20">
+            <div className="bg-white p-4 rounded-xl shadow-sm border-2 border-green-500/20 w-full">
                 <h3 className="font-bold text-gray-700 mb-3">Novo Evento</h3>
-                <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
+                <div className="flex gap-2 mb-3 overflow-x-auto pb-2 w-full">
                     {['pesagem', 'vacina', 'medicamento', 'observacao'].map(t => (
-                        <button key={t} onClick={() => setTipoEvento(t)} className={`px-3 py-2 rounded-lg text-sm font-bold capitalize transition-colors ${tipoEvento === t ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-800'}`}>{t}</button>
+                        <button key={t} onClick={() => setTipoEvento(t)} className={`px-3 py-2 rounded-lg text-sm font-bold capitalize transition-colors flex-shrink-0 ${tipoEvento === t ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-800'}`}>{t}</button>
                     ))}
                 </div>
                 <div className="flex gap-2">
@@ -327,7 +313,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
                         placeholder="Descrição..." 
                         value={novoEvento} 
                         onChange={e => setNovoEvento(e.target.value)} 
-                        className="flex-1 p-2 border-2 border-gray-300 rounded-lg outline-none bg-white text-gray-900" 
+                        className="flex-1 p-2 border-2 border-gray-300 rounded-lg outline-none bg-white text-gray-900 min-w-0" 
                     />
                     <button onClick={adicionarEvento} className="bg-green-600 text-white px-4 rounded-lg font-bold shadow hover:bg-green-700">→</button>
                 </div>
