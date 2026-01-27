@@ -65,7 +65,7 @@ export default function NovoAnimal() {
     checkUser();
   }, [router]);
 
-  // Atualiza categoria automática ao mudar sexo
+  // Atualiza categoria automática
   useEffect(() => {
     if (sexo === 'Femea') setTipo(catFemea[0]);
     else setTipo(catMacho[0]);
@@ -86,7 +86,6 @@ export default function NovoAnimal() {
     
     setCarregando(true);
 
-    // --- CORREÇÃO AQUI: INCLUINDO PAI, MÃE E CUSTO ---
     const dadosAnimal = {
         user_id: user.id,
         brinco,
@@ -96,24 +95,45 @@ export default function NovoAnimal() {
         tipo,
         origem,
         data_entrada: new Date(dataEntrada).toISOString(),
-        custo_aquisicao: origem === 'compra' ? Number(custo) : 0, // Salva o custo
-        pai: origem === 'nascido' ? pai : null, // Salva o Pai se for nascido
-        mae: origem === 'nascido' ? mae : null, // Salva a Mãe se for nascido
+        custo_aquisicao: origem === 'compra' ? Number(custo) : 0,
+        pai: origem === 'nascido' ? pai : null,
+        mae: origem === 'nascido' ? mae : null,
         foto
     };
 
     try {
+        // 1. Salva o Bezerro(a)
         const { error } = await supabase.from('animais').insert([dadosAnimal]);
 
-        if (error) {
-            console.error(error);
-            throw error;
+        if (error) throw error;
+
+        // 2. A MÁGICA: Atualiza a Mãe para Vaca
+        if (origem === 'nascido' && mae) {
+            console.log(`Buscando a mãe (Brinco: ${mae}) para evoluir...`);
+            
+            // Busca a mãe pelo brinco (ignora maiúscula/minúscula com ilike)
+            const { data: maeData } = await supabase
+                .from('animais')
+                .select('id, tipo')
+                .eq('user_id', user.id)
+                .ilike('brinco', mae.trim()) 
+                .single();
+
+            // Se achou a mãe e ela ainda não é Vaca, atualiza!
+            if (maeData && maeData.tipo !== 'Vaca') {
+                await supabase
+                    .from('animais')
+                    .update({ tipo: 'Vaca' })
+                    .eq('id', maeData.id);
+                console.log("Mãe evoluída para Vaca com sucesso!");
+            }
         }
 
-        alert('Animal salvo com sucesso! 🐂✅');
-        router.push('/rebanho'); // Redireciona para a lista
+        alert('Nascimento registrado! A mãe foi atualizada para Vaca. 🐮✅');
+        router.push('/rebanho');
     } catch (erro) {
-        alert('Erro ao salvar. Verifique sua conexão.');
+        console.error(erro);
+        alert('Erro ao salvar. Tente novamente.');
     } finally {
         setCarregando(false);
     }
@@ -136,7 +156,7 @@ export default function NovoAnimal() {
         {/* FOTO */}
         <div className="flex justify-center">
             <label className="w-32 h-32 bg-gray-50 border-2 border-dashed border-gray-300 rounded-full flex items-center justify-center cursor-pointer overflow-hidden relative group hover:border-green-500 transition">
-                {foto ? <img src={foto} className="w-full h-full object-cover" /> : <span className="text-gray-400 font-bold text-xs text-center group-hover:text-green-600">📷 Toque para Adicionar Foto</span>}
+                {foto ? <img src={foto} className="w-full h-full object-cover" /> : <span className="text-gray-400 font-bold text-xs text-center group-hover:text-green-600">📷 Foto</span>}
                 <input type="file" accept="image/*" onChange={processarFoto} className="hidden" />
             </label>
         </div>
@@ -197,12 +217,19 @@ export default function NovoAnimal() {
             ) : (
                 <div className="space-y-3 animate-fade-in">
                     <div>
-                        <label className={labelStyle}>Mãe (Brinco/Nome)</label>
-                        <input type="text" value={mae} onChange={e => setMae(e.target.value)} className={inputStyle} placeholder="Ex: Vaca 09" />
+                        <label className={labelStyle}>Mãe (Brinco exato)</label>
+                        <input 
+                            type="text" 
+                            value={mae} 
+                            onChange={e => setMae(e.target.value)} 
+                            className={inputStyle} 
+                            placeholder="Ex: 105" 
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">*Se existir no sistema, ela virará Vaca automaticamente.</p>
                     </div>
                     <div>
                         <label className={labelStyle}>Pai (Touro/IA)</label>
-                        <input type="text" value={pai} onChange={e => setPai(e.target.value)} className={inputStyle} placeholder="Ex: Touro Reprodutor" />
+                        <input type="text" value={pai} onChange={e => setPai(e.target.value)} className={inputStyle} placeholder="Ex: Touro 01" />
                     </div>
                 </div>
             )}
