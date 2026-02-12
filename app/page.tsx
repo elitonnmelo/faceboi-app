@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { db } from '@/lib/db';
+import { db } from '@/lib/db'; // Banco local
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [erroRede, setErroRede] = useState(false); // <--- NOVO: Estado de erro
   const [resumo, setResumo] = useState({ total: 0, machos: 0, femeas: 0, valor: 0 });
   const [usuario, setUsuario] = useState<any>(null);
 
@@ -18,66 +19,69 @@ export default function Home() {
 
   const carregarPainel = async () => {
     try {
-      // 1. Verifica Usuário (Seguro)
-      const { data: { session } } = await supabase.auth.getSession();
+      setErroRede(false);
+      
+      // 1. Tenta pegar sessão
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) throw sessionError;
       
       if (!session) {
-        // Se não tiver sessão, tenta ver se tem algo no cache para não travar
-        // Mas o ideal é mandar pro login
         router.push('/login');
         return;
       }
 
       setUsuario(session.user);
 
-      // 2. Busca Dados (Local + Nuvem)
-      // Primeiro tenta pegar do cache local (é instantâneo)
-      const cacheAnimais = await db.animaisCache.toArray();
-      const pendentes = await db.animaisPendentes.toArray();
-      
-      let listaFinal = [...cacheAnimais, ...pendentes];
+      // 2. Busca Dados
+      // Tenta primeiro no Supabase
+      const { data, error } = await supabase
+        .from('animais')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('status', 'ativo');
 
-      // Se o cache estiver vazio, tenta buscar na nuvem agora
-      if (listaFinal.length === 0) {
-          const { data, error } = await supabase
-            .from('animais')
-            .select('*')
-            .eq('user_id', session.user.id)
-            .eq('status', 'ativo');
+      if (error) throw error; // Se der NetworkError, pula pro catch
+
+      // Se deu certo, salva no cache local para backup
+      if (data) {
+          await db.animaisCache.clear();
+          await db.animaisCache.bulkPut(data);
           
-          if (!error && data) {
-             listaFinal = data;
-             // Aproveita e salva no cache
-             db.animaisCache.bulkPut(data).catch(e => console.log("Erro ao salvar cache", e));
-          }
+          // Calcula totais
+          const total = data.length;
+          const machos = data.filter(a => a.sexo === 'Macho').length;
+          const femeas = data.filter(a => a.sexo === 'Femea').length;
+          const valor = data.reduce((acc, a) => acc + (Number(a.custo_aquisicao) || 0), 0);
+          setResumo({ total, machos, femeas, valor });
       }
 
-      // 3. Calcula os totais
-      const total = listaFinal.length;
-      const machos = listaFinal.filter(a => a.sexo === 'Macho').length;
-      const femeas = listaFinal.filter(a => a.sexo === 'Femea').length;
+    } catch (erro: any) {
+      console.error("Erro no painel:", erro.message);
       
-      // Estima valor (Peso * R$ 10,00 o kg - Exemplo genérico ou soma custos)
-      // Aqui vamos somar o custo de aquisição para simplificar
-      const valor = listaFinal.reduce((acc, a) => acc + (Number(a.custo_aquisicao) || 0), 0);
-
-      setResumo({ total, machos, femeas, valor });
-
-    } catch (erro) {
-      console.error("Erro crítico no painel:", erro);
-      // O segredo: Se der erro, a gente zera os dados mas libera a tela!
-      setResumo({ total: 0, machos: 0, femeas: 0, valor: 0 });
+      // Se for erro de rede, tenta carregar do cache local
+      if (erro.message === 'Failed to fetch' || erro.message.includes('NetworkError')) {
+          setErroRede(true);
+          const cache = await db.animaisCache.toArray();
+          if (cache.length > 0) {
+              setResumo({
+                  total: cache.length,
+                  machos: cache.filter(a => a.sexo === 'Macho').length,
+                  femeas: cache.filter(a => a.sexo === 'Femea').length,
+                  valor: cache.reduce((acc, a) => acc + (Number(a.custo_aquisicao) || 0), 0)
+              });
+          }
+      }
     } finally {
-      // O SEGREDO 2: O setLoading(false) TEM que rodar, aconteça o que acontecer
       setLoading(false);
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-green-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-700 mb-4"></div>
-        <p className="text-green-800 font-bold">Carregando sua fazenda...</p>
+        <p className="text-green-800 font-bold">Conectando à fazenda...</p>
       </div>
     );
   }
@@ -85,6 +89,13 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-100 p-4 pb-24">
       
+      {/* AVISO DE ERRO DE REDE */}
+      {erroRede && (
+        <div className="bg-red-100 text-red-800 p-3 rounded-xl mb-4 text-sm font-bold border border-red-200 text-center animate-pulse">
+            ⚠️ Sem conexão com o servidor. Mostrando dados locais.
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <div className="flex justify-between items-center mb-8 pt-4">
         <div>
@@ -92,7 +103,7 @@ export default function Home() {
           <p className="text-sm text-gray-500">Bem-vindo ao FaceBoi</p>
         </div>
         <Link href="/perfil">
-            <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center text-green-800 font-bold cursor-pointer hover:bg-green-300 transition">
+            <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center text-green-800 font-bold cursor-pointer hover:bg-green-300 transition shadow-sm">
                 👤
             </div>
         </Link>
