@@ -1,139 +1,160 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-// Se o VS Code reclamar do recharts, rode: npm install recharts
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
-export default function Dashboard() {
+export default function Home() {
   const router = useRouter();
-  const [animais, setAnimais] = useState<any[]>([]);
-  const [eventos, setEventos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resumo, setResumo] = useState({ total: 0, machos: 0, femeas: 0, valor: 0 });
+  const [usuario, setUsuario] = useState<any>(null);
 
   useEffect(() => {
-    const carregarDados = async () => {
-      setLoading(true);
+    carregarPainel();
+  }, []);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+  const carregarPainel = async () => {
+    try {
+      // 1. Verifica Usuário (Seguro)
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        // Se não tiver sessão, tenta ver se tem algo no cache para não travar
+        // Mas o ideal é mandar pro login
         router.push('/login');
         return;
       }
 
-      const { data: dadosAnimais } = await supabase
-        .from('animais')
-        .select('*')
-        .eq('user_id', user.id);
+      setUsuario(session.user);
 
-      const { data: dadosEventos } = await supabase
-        .from('eventos')
-        .select('*')
-        .eq('tipo', 'pesagem')
-        .eq('user_id', user.id);
+      // 2. Busca Dados (Local + Nuvem)
+      // Primeiro tenta pegar do cache local (é instantâneo)
+      const cacheAnimais = await db.animaisCache.toArray();
+      const pendentes = await db.animaisPendentes.toArray();
+      
+      let listaFinal = [...cacheAnimais, ...pendentes];
 
-      if (dadosAnimais) {
-        setAnimais(dadosAnimais);
-        // Lógica simplificada de atualização de categorias
+      // Se o cache estiver vazio, tenta buscar na nuvem agora
+      if (listaFinal.length === 0) {
+          const { data, error } = await supabase
+            .from('animais')
+            .select('*')
+            .eq('user_id', session.user.id)
+            .eq('status', 'ativo');
+          
+          if (!error && data) {
+             listaFinal = data;
+             // Aproveita e salva no cache
+             db.animaisCache.bulkPut(data).catch(e => console.log("Erro ao salvar cache", e));
+          }
       }
 
-      if (dadosEventos) setEventos(dadosEventos);
+      // 3. Calcula os totais
+      const total = listaFinal.length;
+      const machos = listaFinal.filter(a => a.sexo === 'Macho').length;
+      const femeas = listaFinal.filter(a => a.sexo === 'Femea').length;
+      
+      // Estima valor (Peso * R$ 10,00 o kg - Exemplo genérico ou soma custos)
+      // Aqui vamos somar o custo de aquisição para simplificar
+      const valor = listaFinal.reduce((acc, a) => acc + (Number(a.custo_aquisicao) || 0), 0);
+
+      setResumo({ total, machos, femeas, valor });
+
+    } catch (erro) {
+      console.error("Erro crítico no painel:", erro);
+      // O segredo: Se der erro, a gente zera os dados mas libera a tela!
+      setResumo({ total: 0, machos: 0, femeas: 0, valor: 0 });
+    } finally {
+      // O SEGREDO 2: O setLoading(false) TEM que rodar, aconteça o que acontecer
       setLoading(false);
-    };
+    }
+  };
 
-    carregarDados();
-  }, [router]);
-
-  const ativos = animais.filter(a => a.status === 'ativo');
-  
-  // Agrupando dados para o gráfico
-  const contagemPorCategoria = ativos.reduce((acc: any, boi) => {
-    acc[boi.tipo] = (acc[boi.tipo] || 0) + 1;
-    return acc;
-  }, {});
-
-  const dataGrafico = Object.keys(contagemPorCategoria).map(key => ({
-    name: key,
-    value: contagemPorCategoria[key]
-  }));
-
-  const CORES = ['#16a34a', '#2563eb', '#db2777', '#ca8a04', '#9333ea', '#000000'];
-
-  const qtdAlertas = ativos.filter(boi => {
-    const pesagens = eventos
-        .filter(e => e.animal_id === boi.id)
-        .sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
-    
-    if (!pesagens || pesagens.length < 2) return false;
-    const ultima = pesagens[pesagens.length - 1];
-    const penultima = pesagens[pesagens.length - 2];
-    return (ultima.valor || 0) < (penultima.valor || 0);
-  }).length;
-
-  const valorEstimado = ativos.reduce((acc, boi) => acc + (boi.custo_aquisicao || 0), 0);
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando painel...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-green-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-700 mb-4"></div>
+        <p className="text-green-800 font-bold">Carregando sua fazenda...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 pt-20 pb-20">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">📊 Visão Geral</h1>
-        <p className="text-gray-500 text-sm">Dados sincronizados na nuvem</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="bg-white p-5 rounded-2xl shadow-sm flex flex-col items-center justify-center border border-gray-100">
-            <span className="text-4xl mb-2">🐮</span>
-            <span className="text-3xl font-bold text-gray-900">{ativos.length}</span>
-            <span className="text-xs text-gray-500 font-bold uppercase">Animais Ativos</span>
+    <div className="min-h-screen bg-gray-100 p-4 pb-24">
+      
+      {/* Cabeçalho */}
+      <div className="flex justify-between items-center mb-8 pt-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">Olá, {usuario?.user_metadata?.full_name?.split(' ')[0] || 'Produtor'}! 👋</h1>
+          <p className="text-sm text-gray-500">Bem-vindo ao FaceBoi</p>
         </div>
-
-        <Link href="/atencao" className="w-full">
-            <div className={`h-full p-5 rounded-2xl shadow-sm flex flex-col items-center justify-center border-2 ${qtdAlertas > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-                <span className="text-4xl mb-2">{qtdAlertas > 0 ? '🚨' : '✅'}</span>
-                <span className={`text-3xl font-bold ${qtdAlertas > 0 ? 'text-red-600' : 'text-green-600'}`}>{qtdAlertas}</span>
-                <span className={`text-xs font-bold uppercase text-center ${qtdAlertas > 0 ? 'text-red-400' : 'text-green-400'}`}>Alertas Peso</span>
+        <Link href="/perfil">
+            <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center text-green-800 font-bold cursor-pointer hover:bg-green-300 transition">
+                👤
             </div>
         </Link>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm mb-6">
-        <h3 className="font-bold text-gray-700 mb-4 text-center">Distribuição do Rebanho</h3>
-        <div className="h-64 w-full relative">
-            {ativos.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                        <Pie
-                            data={dataGrafico}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                        >
-                            {dataGrafico.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={CORES[index % CORES.length]} />
-                            ))}
-                        </Pie>
-                        <Tooltip contentStyle={{backgroundColor: 'white', borderRadius: '10px'}} />
-                        <Legend verticalAlign="bottom" height={36}/>
-                    </PieChart>
-                </ResponsiveContainer>
-            ) : (
-                <div className="flex items-center justify-center h-full text-gray-400 text-sm">Sem dados para gráfico</div>
-            )}
+      {/* Cards de Resumo */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="bg-white p-5 rounded-2xl shadow-sm border-l-4 border-green-500">
+            <p className="text-gray-500 text-xs font-bold uppercase mb-1">Rebanho Total</p>
+            <p className="text-3xl font-bold text-gray-900">{resumo.total}</p>
+            <p className="text-xs text-green-600 mt-1">Animais ativos</p>
+        </div>
+        <div className="bg-white p-5 rounded-2xl shadow-sm border-l-4 border-blue-500">
+            <p className="text-gray-500 text-xs font-bold uppercase mb-1">Investimento</p>
+            <p className="text-xl font-bold text-gray-900">R$ {resumo.valor.toFixed(0)}</p>
+            <p className="text-xs text-blue-600 mt-1">Em aquisições</p>
         </div>
       </div>
 
-      <div className="bg-gray-900 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
-        <div className="relative z-10">
-            <p className="text-green-400 text-xs font-bold uppercase mb-1">Investimento em Aquisição</p>
-            <p className="text-3xl font-bold">R$ {valorEstimado.toLocaleString('pt-BR')}</p>
+      {/* Distribuição */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm mb-6">
+        <h3 className="font-bold text-gray-800 mb-4">📊 Distribuição do Rebanho</h3>
+        <div className="flex items-center gap-4">
+            <div className="flex-1 text-center p-3 bg-pink-50 rounded-xl">
+                <p className="text-2xl font-bold text-pink-600">{resumo.femeas}</p>
+                <p className="text-xs text-pink-400 font-bold uppercase">Fêmeas</p>
+            </div>
+            <div className="flex-1 text-center p-3 bg-blue-50 rounded-xl">
+                <p className="text-2xl font-bold text-blue-600">{resumo.machos}</p>
+                <p className="text-xs text-blue-400 font-bold uppercase">Machos</p>
+            </div>
         </div>
       </div>
+
+      {/* Menu Rápido */}
+      <h3 className="font-bold text-gray-800 mb-4 px-1">Acesso Rápido</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <Link href="/rebanho">
+            <div className="bg-green-600 p-4 rounded-2xl shadow-lg text-white hover:bg-green-700 active:scale-95 transition cursor-pointer h-32 flex flex-col justify-between">
+                <span className="text-3xl">🐂</span>
+                <span className="font-bold">Meu Rebanho</span>
+            </div>
+        </Link>
+        
+        <Link href="/novo">
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:border-green-500 active:scale-95 transition cursor-pointer h-32 flex flex-col justify-between group">
+                <span className="text-3xl group-hover:scale-110 transition">➕</span>
+                <span className="font-bold text-gray-700 group-hover:text-green-600">Novo Animal</span>
+            </div>
+        </Link>
+
+        <Link href="/configuracoes">
+             <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:border-blue-500 active:scale-95 transition cursor-pointer h-24 flex items-center gap-3 group col-span-2">
+                <span className="text-2xl bg-blue-100 p-2 rounded-lg">⚙️</span>
+                <div>
+                    <p className="font-bold text-gray-800">Backup & Dados</p>
+                    <p className="text-xs text-gray-400">Salvar ou restaurar</p>
+                </div>
+            </div>
+        </Link>
+      </div>
+
     </div>
   );
 }
