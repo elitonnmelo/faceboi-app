@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-// Se der erro no recharts, avise. Mas deve estar instalado.
+// Certifique-se de que o recharts está instalado
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 export default function Dashboard() {
@@ -17,51 +17,46 @@ export default function Dashboard() {
     const carregarDados = async () => {
       setLoading(true);
 
-      // 1. Verifica Login
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        router.push('/login');
-        return;
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (!session) {
+          router.push('/login');
+          return;
+        }
+
+        const userId = session.user.id;
+
+        // Busca Animais
+        const { data: dadosAnimais, error: erroAnimais } = await supabase
+            .from('animais')
+            .select('*')
+            .eq('user_id', userId);
+
+        if (dadosAnimais) setAnimais(dadosAnimais);
+
+        // Busca Eventos (Pesagem)
+        const { data: dadosEventos, error: erroEventos } = await supabase
+            .from('eventos')
+            .select('*')
+            .eq('tipo', 'pesagem')
+            .eq('user_id', userId);
+
+        if (dadosEventos) setEventos(dadosEventos);
+
+      } catch (error) {
+        console.error("Erro ao carregar:", error);
+      } finally {
+        setLoading(false);
       }
-
-      const userId = session.user.id;
-
-      // 2. Busca Animais (Direto da Nuvem - Simples e Rápido)
-      const { data: dadosAnimais, error: erroAnimais } = await supabase
-        .from('animais')
-        .select('*')
-        .eq('user_id', userId);
-
-      if (erroAnimais) {
-        console.error("Erro ao carregar animais:", erroAnimais);
-      } else {
-        setAnimais(dadosAnimais || []);
-      }
-
-      // 3. Busca Pesagens (Para os alertas)
-      const { data: dadosEventos, error: erroEventos } = await supabase
-        .from('eventos')
-        .select('*')
-        .eq('tipo', 'pesagem')
-        .eq('user_id', userId);
-
-      if (erroEventos) {
-        console.error("Erro ao carregar eventos:", erroEventos);
-      } else {
-        setEventos(dadosEventos || []);
-      }
-
-      setLoading(false);
     };
 
     carregarDados();
   }, [router]);
 
-  // --- LÓGICA DE CÁLCULO (IGUAL AO SEU ORIGINAL) ---
   const ativos = animais.filter(a => a.status === 'ativo');
   
-  // Gráfico de Pizza
+  // Agrupando dados para o gráfico
   const contagemPorCategoria = ativos.reduce((acc: any, boi) => {
     acc[boi.tipo] = (acc[boi.tipo] || 0) + 1;
     return acc;
@@ -74,7 +69,6 @@ export default function Dashboard() {
 
   const CORES = ['#16a34a', '#2563eb', '#db2777', '#ca8a04', '#9333ea', '#000000'];
 
-  // Alertas de perda de peso
   const qtdAlertas = ativos.filter(boi => {
     const pesagens = eventos
         .filter(e => e.animal_id === boi.id)
@@ -86,7 +80,6 @@ export default function Dashboard() {
     return (ultima.valor || 0) < (penultima.valor || 0);
   }).length;
 
-  // Valor total investido
   const valorEstimado = ativos.reduce((acc, boi) => acc + (boi.custo_aquisicao || 0), 0);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando painel...</div>;
