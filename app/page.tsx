@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-// Certifique-se de que o recharts está instalado
+// Se o VS Code reclamar do recharts, rode: npm install recharts
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 export default function Dashboard() {
@@ -17,38 +17,30 @@ export default function Dashboard() {
     const carregarDados = async () => {
       setLoading(true);
 
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (!session) {
-          router.push('/login');
-          return;
-        }
-
-        const userId = session.user.id;
-
-        // Busca Animais
-        const { data: dadosAnimais, error: erroAnimais } = await supabase
-            .from('animais')
-            .select('*')
-            .eq('user_id', userId);
-
-        if (dadosAnimais) setAnimais(dadosAnimais);
-
-        // Busca Eventos (Pesagem)
-        const { data: dadosEventos, error: erroEventos } = await supabase
-            .from('eventos')
-            .select('*')
-            .eq('tipo', 'pesagem')
-            .eq('user_id', userId);
-
-        if (dadosEventos) setEventos(dadosEventos);
-
-      } catch (error) {
-        console.error("Erro ao carregar:", error);
-      } finally {
-        setLoading(false);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
       }
+
+      const { data: dadosAnimais } = await supabase
+        .from('animais')
+        .select('*')
+        .eq('user_id', user.id);
+
+      const { data: dadosEventos } = await supabase
+        .from('eventos')
+        .select('*')
+        .eq('tipo', 'pesagem')
+        .eq('user_id', user.id);
+
+      if (dadosAnimais) {
+        setAnimais(dadosAnimais);
+        // Lógica simplificada de atualização de categorias
+      }
+
+      if (dadosEventos) setEventos(dadosEventos);
+      setLoading(false);
     };
 
     carregarDados();
