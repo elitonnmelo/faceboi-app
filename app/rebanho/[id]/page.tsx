@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation'; 
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const comprimirImagem = async (file: File): Promise<string> => {
@@ -28,12 +28,16 @@ const comprimirImagem = async (file: File): Promise<string> => {
   });
 };
 
-export default function DetalhesAnimal({ params }: { params: { id: string } }) {
+export default function DetalhesAnimal() {
   const router = useRouter();
-  const idDoAnimal = Number(params.id);
+  const params = useParams(); 
+  
+  // CORREÇÃO: Garante que o ID seja numérico para o Supabase
+  const idDoAnimal = params?.id ? Number(params.id) : 0;
 
   const [animal, setAnimal] = useState<any>(null);
   const [eventos, setEventos] = useState<any[]>([]);
+  const [pesagensAuto, setPesagensAuto] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Inputs
@@ -65,8 +69,19 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
 
       setEventos(eventosData || []);
 
+      if (animalData.rfid) {
+        const { data: pesagensData } = await supabase
+          .from('pesagens')
+          .select('*')
+          .eq('rfid', animalData.rfid)
+          .order('data_hora', { ascending: true });
+        
+        setPesagensAuto(pesagensData || []);
+      }
+
     } catch (error) {
-      alert('Erro ao carregar detalhes.');
+      console.error(error);
+      alert('Erro ao carregar detalhes do animal.');
       router.push('/rebanho');
     } finally {
       setLoading(false);
@@ -74,7 +89,9 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
   };
 
   useEffect(() => {
-    if (idDoAnimal) carregarDados();
+    if (idDoAnimal > 0) {
+        carregarDados();
+    }
   }, [idDoAnimal]);
 
   const deletarAnimal = async () => {
@@ -117,7 +134,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     if (tipoEvento === 'pesagem') {
         if (!valorInput) return alert('Informe o peso');
         valorFinal = Number(valorCorrigido);
-        descricaoFinal = `Pesou ${valorFinal} Kg`;
+        descricaoFinal = `Pesou ${valorFinal} Kg (Manual)`;
     }
     else if (tipoEvento === 'vacina' || tipoEvento === 'medicamento') {
         if (valorInput) custoFinal = Number(valorCorrigido);
@@ -158,21 +175,24 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
     carregarDados();
   }
 
-  const dadosGrafico = eventos?.filter(e => e.tipo === 'pesagem').map(e => ({ data: new Date(e.data).toLocaleDateString().slice(0, 5), peso: e.valor }));
+  // --- IA DO GRÁFICO ---
+  const dadosGrafico = [
+    ...(eventos?.filter(e => e.tipo === 'pesagem').map(e => ({ dataRaw: e.data, peso: e.valor })) || []),
+    ...(pesagensAuto?.map(p => ({ dataRaw: p.data_hora, peso: p.peso })) || [])
+  ]
+  .sort((a, b) => new Date(a.dataRaw).getTime() - new Date(b.dataRaw).getTime())
+  .map(item => ({ data: new Date(item.dataRaw).toLocaleDateString().slice(0, 5), peso: item.peso }));
+
   const custoTotal = (animal?.custo_aquisicao || 0) + (eventos?.reduce((acc, e) => acc + (e.custo || 0), 0) || 0);
 
-  if (loading || !animal) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando...</div>;
+  if (loading || !animal) return <div className="min-h-screen flex items-center justify-center text-green-800 font-bold">Carregando perfil...</div>;
 
   return (
-    // CORREÇÃO 1: overflow-x-hidden impede a tela de "sambar" para os lados
     <div className="min-h-screen bg-gray-100 pb-20 overflow-x-hidden w-full relative">
       
-      {/* ZOOM FOTO */}
       {verFoto && animal.foto && (
         <div className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center p-4 cursor-pointer backdrop-blur-sm" onClick={() => setVerFoto(false)}>
             <img src={animal.foto} className="max-w-full max-h-full rounded-lg shadow-2xl object-contain animate-fade-in" />
-            
-            {/* CORREÇÃO 2: Botão Fixed para garantir que aparece na tela */}
             <button 
                 onClick={(e) => { e.stopPropagation(); setVerFoto(false); }}
                 className="fixed top-6 right-6 bg-white/20 text-white w-10 h-10 rounded-full flex items-center justify-center text-xl font-bold backdrop-blur-md z-[10000]"
@@ -182,7 +202,6 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {/* MODAL VENDA */}
       {modalVenda && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl">
@@ -198,7 +217,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {/* CABEÇALHO */}
+      {/* CABEÇALHO DA FOTO */}
       <div className="relative h-72 bg-gray-900 group w-full">
         {animal.foto ? (
             <img src={animal.foto} onClick={() => setVerFoto(true)} className={`w-full h-full object-cover cursor-pointer transition duration-300 ${animal.status === 'vendido' ? 'grayscale opacity-50' : 'opacity-80 hover:opacity-100'}`} />
@@ -207,8 +226,18 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
         )}
         
         <button onClick={() => router.back()} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow text-black font-bold z-10 hover:bg-gray-200">←</button>
-        
         <button onClick={deletarAnimal} className="absolute top-4 right-4 bg-red-100 p-2 rounded-full shadow text-red-600 font-bold z-10 hover:bg-red-200 border-2 border-red-200">🗑️</button>
+
+        {/* BADGE DA TAG RFID */}
+        {animal.rfid && (
+          <div className="absolute top-16 left-4 bg-black/60 backdrop-blur-sm border border-gray-500/50 px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-2 z-10">
+            <span className="text-blue-400 animate-pulse">📡</span>
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase font-bold tracking-wider leading-none">Tag Eletrônica</p>
+              <p className="text-white font-mono text-xs leading-none mt-0.5">{animal.rfid.substring(0, 10)}...</p>
+            </div>
+          </div>
+        )}
 
         {animal.status === 'ativo' && (
             <label className="absolute top-16 right-4 bg-white p-3 rounded-full shadow cursor-pointer z-10 hover:bg-gray-200 active:scale-95 transition">
@@ -252,34 +281,33 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
 
       <div className="p-4 space-y-6">
         
-        {/* INFO RÁPIDA */}
         <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-600">
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-600 flex flex-col justify-center">
                 <p className="text-xs text-gray-500 font-bold uppercase">Peso Atual</p>
-                <p className="text-2xl font-bold text-gray-900">{animal.peso_atual} <span className="text-sm font-normal">kg</span></p>
+                <p className="text-2xl font-bold text-gray-900">{animal.peso_atual} <span className="text-sm font-normal text-gray-500">kg</span></p>
             </div>
-            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-600">
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-600 flex flex-col justify-center">
                 <p className="text-xs text-gray-500 font-bold uppercase">Investimento</p>
                 <p className="text-2xl font-bold text-gray-900">R$ {custoTotal.toFixed(2)}</p>
             </div>
         </div>
 
-        {/* GRÁFICO */}
+        {/* GRÁFICO INTELIGENTE */}
         {dadosGrafico && dadosGrafico.length > 1 && (
-            <div className="bg-white p-4 rounded-xl shadow-sm h-48 w-full overflow-hidden">
-                <ResponsiveContainer width="100%" height="100%">
+            <div className="bg-white p-4 rounded-xl shadow-sm h-56 w-full overflow-hidden border border-gray-100">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Evolução de Peso</p>
+                <ResponsiveContainer width="100%" height="85%">
                     <LineChart data={dadosGrafico}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="data" style={{ fontSize: '12px' }} />
-                        <YAxis domain={['auto', 'auto']} style={{ fontSize: '12px' }} />
-                        <Tooltip contentStyle={{backgroundColor: 'white', color: 'black'}} />
-                        <Line type="monotone" dataKey="peso" stroke="#16a34a" strokeWidth={3} dot={{r: 4}} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                        <XAxis dataKey="data" style={{ fontSize: '11px', fill: '#9ca3af' }} tickMargin={10} />
+                        <YAxis domain={['auto', 'auto']} style={{ fontSize: '11px', fill: '#9ca3af' }} width={30} />
+                        <Tooltip contentStyle={{backgroundColor: '#1f2937', color: 'white', borderRadius: '8px', border: 'none'}} />
+                        <Line type="monotone" dataKey="peso" stroke="#16a34a" strokeWidth={4} dot={{r: 4, fill: '#16a34a', strokeWidth: 2, stroke: 'white'}} activeDot={{r: 6}} />
                     </LineChart>
                 </ResponsiveContainer>
             </div>
         )}
 
-        {/* BOTÃO DE VENDA */}
         {animal.status === 'ativo' && (
             <button 
                 onClick={() => setModalVenda(true)}
@@ -289,13 +317,12 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
             </button>
         )}
 
-        {/* REGISTRO DE EVENTOS */}
         {animal.status === 'ativo' && (
-            <div className="bg-white p-4 rounded-xl shadow-sm border-2 border-green-500/20 w-full">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 w-full">
                 <h3 className="font-bold text-gray-700 mb-3">Novo Evento</h3>
-                <div className="flex gap-2 mb-3 overflow-x-auto pb-2 w-full">
+                <div className="flex gap-2 mb-3 overflow-x-auto pb-2 w-full custom-scrollbar">
                     {['pesagem', 'vacina', 'medicamento', 'observacao'].map(t => (
-                        <button key={t} onClick={() => setTipoEvento(t)} className={`px-3 py-2 rounded-lg text-sm font-bold capitalize transition-colors flex-shrink-0 ${tipoEvento === t ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-800'}`}>{t}</button>
+                        <button key={t} onClick={() => setTipoEvento(t)} className={`px-3 py-2 rounded-lg text-sm font-bold capitalize transition-colors flex-shrink-0 border ${tipoEvento === t ? 'bg-gray-900 text-white border-gray-900' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>{t}</button>
                     ))}
                 </div>
                 <div className="flex gap-2">
@@ -305,7 +332,7 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
                             placeholder={tipoEvento === 'pesagem' ? 'Kg' : 'R$'} 
                             value={valorInput} 
                             onChange={e => setValorInput(e.target.value)} 
-                            className="w-24 p-2 border-2 border-gray-300 rounded-lg outline-none font-bold bg-white text-gray-900" 
+                            className="w-20 p-2 border border-gray-300 rounded-lg outline-none font-bold bg-gray-50 text-gray-900 focus:border-green-500 transition-colors" 
                         />
                     )}
                     <input 
@@ -313,24 +340,45 @@ export default function DetalhesAnimal({ params }: { params: { id: string } }) {
                         placeholder="Descrição..." 
                         value={novoEvento} 
                         onChange={e => setNovoEvento(e.target.value)} 
-                        className="flex-1 p-2 border-2 border-gray-300 rounded-lg outline-none bg-white text-gray-900 min-w-0" 
+                        className="flex-1 p-2 border border-gray-300 rounded-lg outline-none bg-gray-50 text-gray-900 min-w-0 focus:border-green-500 transition-colors" 
                     />
-                    <button onClick={adicionarEvento} className="bg-green-600 text-white px-4 rounded-lg font-bold shadow hover:bg-green-700">→</button>
+                    <button onClick={adicionarEvento} className="bg-green-600 text-white px-4 rounded-lg font-bold shadow hover:bg-green-700 transition-colors">→</button>
                 </div>
             </div>
         )}
 
         {/* HISTÓRICO */}
         <div className="space-y-2">
+            <h3 className="font-bold text-gray-700 mb-2 pl-1">Linha do Tempo</h3>
+            
             {eventos?.slice().reverse().map(ev => (
-                <div key={ev.id} className="bg-white p-3 rounded-lg flex justify-between items-center text-sm shadow-sm border border-gray-100">
-                    <div>
-                        <span className="font-bold mr-2 text-xs uppercase text-gray-500">{ev.tipo}</span>
-                        <span className="text-gray-900 font-medium">{ev.descricao}</span>
+                <div key={ev.id} className="bg-white p-3 rounded-xl flex justify-between items-center text-sm shadow-sm border border-gray-100">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">📝</div>
+                        <div>
+                            <span className="font-bold mr-2 text-xs uppercase text-gray-500 block">{ev.tipo}</span>
+                            <span className="text-gray-900 font-medium">{ev.descricao}</span>
+                        </div>
                     </div>
                     <div className="text-right">
-                        <div className="text-gray-400 text-xs">{new Date(ev.data).toLocaleDateString()}</div>
+                        <div className="text-gray-400 text-xs font-mono">{new Date(ev.data).toLocaleDateString()}</div>
                         {ev.custo && <div className="text-red-600 font-bold text-xs">- R$ {ev.custo}</div>}
+                    </div>
+                </div>
+            ))}
+
+            {pesagensAuto?.slice().reverse().map(pesagem => (
+                <div key={pesagem.id} className="bg-blue-50 p-3 rounded-xl flex justify-between items-center text-sm shadow-sm border border-blue-100">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">📡</div>
+                        <div>
+                            <span className="font-bold mr-2 text-[10px] uppercase text-blue-600 block">Balança Smart</span>
+                            <span className="text-blue-900 font-medium">Pesagem Automática</span>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-gray-500 text-xs font-mono">{new Date(pesagem.data_hora).toLocaleDateString()}</div>
+                        <div className="text-blue-700 font-black text-sm">{pesagem.peso.toFixed(1)} kg</div>
                     </div>
                 </div>
             ))}

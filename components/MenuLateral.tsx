@@ -8,18 +8,75 @@ import { supabase } from '@/lib/supabase';
 export default function MenuLateral() {
   const [aberto, setAberto] = useState(false);
   const [emailUsuario, setEmailUsuario] = useState<string | null>(null);
+  
+  const [possuiBalanca, setPossuiBalanca] = useState<boolean>(false);
+  const [alertasPendentes, setAlertasPendentes] = useState<number>(0);
+
   const pathname = usePathname();
   const router = useRouter();
 
   const fechar = () => setAberto(false);
 
   useEffect(() => {
-    const getUsuario = async () => {
+    const getDadosIniciais = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) setEmailUsuario(user.email ?? 'Usuário');
+      if (user) {
+        setEmailUsuario(user.email ?? 'Usuário');
+        setPossuiBalanca(true); 
+        
+        const { data: animais } = await supabase
+          .from('animais')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('status', 'ativo');
+
+        const { data: pesagens } = await supabase
+          .from('pesagens')
+          .select('*')
+          .order('data_hora', { ascending: false });
+
+        let contadorAlertas = 0;
+
+        if (animais && pesagens) {
+          const agora = new Date();
+
+          animais.forEach((boi: any) => {
+            const chaveBusca = boi.rfid || boi.brinco;
+            const historicoBoi = pesagens.filter(p => p.rfid === chaveBusca);
+
+            if (historicoBoi.length === 0) return;
+
+            const ultimaPesagem = historicoBoi[0];
+            const dataUltima = new Date(ultimaPesagem.data_hora).getTime();
+            const dataVerificacao = boi.data_verificacao_alerta ? new Date(boi.data_verificacao_alerta).getTime() : 0;
+            
+            const horasSumido = (agora.getTime() - dataUltima) / (1000 * 60 * 60);
+            const dataFicouSumido = dataUltima + (48 * 60 * 60 * 1000); 
+            
+            if (horasSumido > 48 && dataVerificacao < dataFicouSumido) {
+              contadorAlertas++;
+              return; 
+            }
+
+            if (historicoBoi.length >= 2) {
+              let penultimaReal = historicoBoi.find(p => (dataUltima - new Date(p.data_hora).getTime()) > (12 * 60 * 60 * 1000));
+              if (!penultimaReal) penultimaReal = historicoBoi[1];
+
+              const diferencaPeso = ultimaPesagem.peso - penultimaReal.peso;
+
+              if (dataVerificacao < dataUltima && diferencaPeso <= -2) {
+                contadorAlertas++;
+              }
+            }
+          });
+        }
+
+        setAlertasPendentes(contadorAlertas);
+      }
     };
-    getUsuario();
-  }, []);
+    
+    getDadosIniciais();
+  }, [pathname]);
 
   const deslogar = async () => {
     await supabase.auth.signOut();
@@ -30,14 +87,20 @@ export default function MenuLateral() {
   const links = [
     { nome: 'Dashboard', url: '/', icone: '📊' },
     { nome: 'Meu Rebanho', url: '/rebanho', icone: '🐮' },
-    { nome: 'Atenção', url: '/atencao', icone: '🚨' },
+    
+    ...(possuiBalanca ? [
+      { nome: 'Balança Smart', url: '/balanca', icone: '⚖️' },
+      { nome: 'Atenção', url: '/atencao', icone: '🚨', badge: alertasPendentes },
+    ] : [
+      { nome: 'Balança Smart', url: '/comprar-balanca', icone: '🔒', bloqueado: true },
+    ]),
+
     { nome: 'Perfil', url: '/perfil', icone: '👤' },
     { nome: 'Configurações', url: '/config', icone: '⚙️' },
   ];
 
   return (
     <>
-      {/* Botão do Menu (Discreto e Profissional) */}
       {pathname !== '/login' && (
         <button 
           onClick={() => setAberto(true)}
@@ -50,7 +113,6 @@ export default function MenuLateral() {
         </button>
       )}
 
-      {/* Fundo Escuro (Overlay) */}
       {aberto && (
         <div 
           onClick={fechar}
@@ -58,10 +120,8 @@ export default function MenuLateral() {
         />
       )}
 
-      {/* Gaveta do Menu */}
       <div className={`fixed top-0 left-0 h-full w-72 bg-gray-900 text-white z-[60] transform transition-transform duration-300 ease-in-out shadow-2xl flex flex-col ${aberto ? 'translate-x-0' : '-translate-x-full'}`}>
         
-        {/* Cabeçalho do Menu */}
         <div className="p-6 border-b border-gray-800 bg-gray-800/50">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-black text-green-500 italic tracking-tighter">FACEBOI</h2>
@@ -79,22 +139,37 @@ export default function MenuLateral() {
           </div>
         </div>
 
-        {/* Links de Navegação */}
         <nav className="p-4 space-y-2 flex-1 overflow-y-auto custom-scrollbar">
           {links.map((link) => {
+            
+            if (link.bloqueado) {
+              return (
+                <div key={link.nome} className="flex items-center gap-4 p-3 rounded-xl opacity-40 cursor-not-allowed bg-gray-800/30 border border-gray-700/50" title="Adquira a Balança FaceBoi para liberar">
+                  <span className="text-xl grayscale">{link.icone}</span>
+                  <span className="text-sm uppercase tracking-wide flex-1 text-gray-500">{link.nome}</span>
+                  <span className="text-[9px] bg-green-900/50 text-green-500 px-2 py-0.5 rounded-sm font-bold border border-green-800">PRO</span>
+                </div>
+              );
+            }
+
             const ativo = pathname === link.url;
             return (
               <Link key={link.url} href={link.url} onClick={fechar}>
                 <div className={`flex items-center gap-4 p-3 rounded-xl transition-all duration-200 group ${ativo ? 'bg-green-600 text-white font-bold shadow-lg shadow-green-900/20' : 'hover:bg-gray-800 text-gray-400 hover:text-white'}`}>
                   <span className={`text-xl transition-transform group-hover:scale-110 ${ativo ? 'scale-110' : ''}`}>{link.icone}</span>
-                  <span className="text-sm uppercase tracking-wide">{link.nome}</span>
+                  <span className="text-sm uppercase tracking-wide flex-1">{link.nome}</span>
+                  
+                  {link.badge !== undefined && link.badge > 0 && (
+                    <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg shadow-red-900/50 animate-pulse">
+                      {link.badge}
+                    </span>
+                  )}
                 </div>
               </Link>
             );
           })}
         </nav>
 
-        {/* Rodapé */}
         <div className="p-4 border-t border-gray-800 bg-gray-900">
             <button 
                 onClick={deslogar}
@@ -103,7 +178,7 @@ export default function MenuLateral() {
                 <span className="group-hover:-translate-x-1 transition-transform">🚪</span>
                 <span className="text-sm font-bold uppercase">Sair do Sistema</span>
             </button>
-            <p className="text-center text-[10px] text-gray-600 mt-4 font-mono">v1.2.0 • Stable Build</p>
+            <p className="text-center text-[10px] text-gray-600 mt-4 font-mono">v1.3.0</p>
         </div>
       </div>
     </>
